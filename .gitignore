@@ -1,0 +1,12 @@
+config.json
+.env
+
+dist/
+build/
+conversations/
+__pycache__/
+*.py[cod]
+*.spec
+
+.vscode/
+.idea/
