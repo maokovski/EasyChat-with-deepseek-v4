@@ -1,35 +1,61 @@
-# DeepSeek Chat Desktop
+# EasyChat with DeepSeek V4
 
-A small Tkinter desktop chat client for DeepSeek's OpenAI-compatible API.
+A small Windows-friendly Tkinter desktop chat client for DeepSeek's
+OpenAI-compatible API.
 
-## Local Setup
+## Features
 
-Clone the project and enter the folder:
+- Desktop chat UI built with Python Tkinter.
+- DeepSeek V4 Pro and V4 Flash model switching.
+- Per-model thinking mode control: disabled, high, or max.
+- Local conversation history with per-record delete controls.
+- Summary memory for long chats: older turns are compressed into a saved
+  summary while recent turns stay available as full context.
+- Markdown-style chat rendering for headings, bold/italic text, code, tables,
+  links, superscript/subscript, and emoji.
+- Clickable links open in the system default browser.
+- Light and dark themes.
+- Optional one-folder Windows executable build with PyInstaller.
+
+## Requirements
+
+- Windows is the primary target.
+- Python 3.10 or newer is recommended.
+- A DeepSeek API key.
+- Python dependency: `openai`.
+
+## Quick Start
+
+Clone the repository:
 
 ```powershell
-git clone <your-repo-url>
-cd DeepSeekChatProject
+git clone https://github.com/maokovski/EasyChat-with-deepseek-v4.git
+cd EasyChat-with-deepseek-v4
 ```
 
-Install the Python dependency:
+Install the dependency:
 
 ```powershell
 pip install openai
 ```
 
-Create your local config file:
+Create your local config:
 
 ```powershell
 copy config.example.json config.json
 ```
 
-Open `config.json` and fill in your own DeepSeek API key:
+Edit `config.json` and add your DeepSeek API key:
 
 ```json
 {
   "DEEPSEEK_API_KEY": "sk-your-api-key",
   "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
   "default_model": "deepseek-v4-pro",
+  "thinking_modes": {
+    "deepseek-v4-pro": "disabled",
+    "deepseek-v4-flash": "disabled"
+  },
   "theme": "light",
   "window_geometry": "980x680"
 }
@@ -41,14 +67,34 @@ Run the app:
 python ds_v4.py
 ```
 
-## Notes
+## Configuration
 
-This repository does not include an API key. Each user must create their own
-`config.json` from `config.example.json`.
+`config.json` is created locally from `config.example.json` and is ignored by
+Git.
 
-Local chat history is saved in `conversations/`. This folder is ignored by Git.
+- `DEEPSEEK_API_KEY`: Your DeepSeek API key.
+- `DEEPSEEK_BASE_URL`: DeepSeek API base URL.
+- `default_model`: `deepseek-v4-pro` or `deepseek-v4-flash`.
+- `thinking_modes`: Per-model thinking mode, one of `disabled`, `high`, `max`.
+- `theme`: `light` or `dark`.
+- `window_geometry`: Initial Tkinter window size.
 
-## Optional Portable Build
+The system prompt is stored in `prompts.txt`.
+
+## Local Data
+
+This repository does not include an API key.
+
+Local runtime data is not committed:
+
+- `config.json`
+- `conversations/`
+- `dist/`
+- `build/`
+
+Conversation sessions are saved in `conversations/sessions.json`.
+
+## Portable Windows Build
 
 To build a copyable Windows folder with an `.exe`:
 
@@ -56,8 +102,22 @@ To build a copyable Windows folder with an `.exe`:
 .\build_exe.ps1
 ```
 
-The output will be:
+The output folder is:
 
 ```text
 dist/DeepSeekChat/
 ```
+
+Before copying the portable build to another machine, fill in:
+
+```text
+dist/DeepSeekChat/config.json
+```
+
+## Notes
+
+Feature changes require editing the Python source files and rebuilding the
+portable app.
+
+The compatibility entrypoint is `ds_v4.py`; the main application implementation
+lives in `deepseek_api_client.py`.
