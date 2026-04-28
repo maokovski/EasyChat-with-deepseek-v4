@@ -21,6 +21,7 @@ import sys
 import threading
 import tkinter as tk
 import time
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Any, Dict, Iterator, List, Literal, Optional
@@ -50,6 +51,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "DEEPSEEK_API_KEY": "",
     "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
     "default_model": "deepseek-v4-pro",
+    "thinking_modes": {
+        "deepseek-v4-pro": "disabled",
+        "deepseek-v4-flash": "disabled",
+    },
     "theme": "light",
     "window_geometry": "980x680",
 }
@@ -207,9 +212,49 @@ DeepSeekV4Client = DeepSeekClient
 
 
 CHAT_BODY_FONT = ("SimSun", 12)
+CHAT_BODY_BOLD_FONT = ("SimSun", 12, "bold")
+CHAT_BODY_ITALIC_FONT = ("SimSun", 12, "italic")
+CHAT_BODY_BOLD_ITALIC_FONT = ("SimSun", 12, "bold italic")
+CHAT_HEADING_FONT = ("Microsoft YaHei UI", 13, "bold")
+CHAT_CODE_FONT = ("Consolas", 11)
+CHAT_TABLE_FONT = ("Cascadia Mono", 10)
+CHAT_SUPSUB_FONT = ("SimSun", 9)
+CHAT_EMOJI_FONT = ("Segoe UI Emoji", 12)
 CHAT_META_FONT = ("Microsoft YaHei UI", 9)
 INPUT_FONT = ("SimSun", 12)
 UI_FONT = ("Microsoft YaHei UI", 10)
+CONTEXT_RECENT_MESSAGE_COUNT = 10
+SUMMARY_BATCH_MIN_MESSAGES = 4
+SUMMARY_SYSTEM_PROMPT = (
+    "你是对话记忆整理器。请把旧对话压缩成一份简洁但信息充分的中文摘要，"
+    "保留用户目标、关键决定、项目约束、已完成修改、待办事项、重要事实和偏好。"
+    "不要添加原文中没有的信息。"
+)
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001f1e6-\U0001f1ff"
+    "\U0001f300-\U0001f5ff"
+    "\U0001f600-\U0001f64f"
+    "\U0001f680-\U0001f6ff"
+    "\U0001f700-\U0001f77f"
+    "\U0001f780-\U0001f7ff"
+    "\U0001f800-\U0001f8ff"
+    "\U0001f900-\U0001f9ff"
+    "\U0001fa70-\U0001faff"
+    "\u2600-\u27bf"
+    "]+"
+)
+CHAT_LINE_SPACING = {
+    "message_before": 5,
+    "message_wrap": 3,
+    "message_after": 10,
+    "system_before": 3,
+    "system_wrap": 2,
+    "system_after": 8,
+    "input_before": 1,
+    "input_wrap": 2,
+    "input_after": 1,
+}
 
 
 def format_latex_for_text_widget(text: str) -> str:
@@ -260,16 +305,37 @@ def format_latex_for_text_widget(text: str) -> str:
     def sqrt(match: re.Match[str]) -> str:
         return f"sqrt({match.group(1).strip()})"
 
-    text = re.sub(r"\\\[(.*?)\\\]", display_formula, text, flags=re.DOTALL)
-    text = re.sub(r"\$\$(.*?)\$\$", display_formula, text, flags=re.DOTALL)
-    text = re.sub(r"\\\((.*?)\\\)", inline_formula, text, flags=re.DOTALL)
-    text = re.sub(r"(?<!\\)\$(.+?)(?<!\\)\$", inline_formula, text, flags=re.DOTALL)
-    text = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", fraction, text)
-    text = re.sub(r"\\sqrt\{([^{}]+)\}", sqrt, text)
+    def protect_inline_code(segment: str) -> tuple[str, Dict[str, str]]:
+        protected: Dict[str, str] = {}
 
-    for raw, formatted in replacements.items():
-        text = text.replace(raw, formatted)
+        def replace(match: re.Match[str]) -> str:
+            key = f"@@INLINE_CODE_{len(protected)}@@"
+            protected[key] = match.group(0)
+            return key
 
+        return re.sub(r"`[^`\n]+`", replace, segment), protected
+
+    def restore_inline_code(segment: str, protected: Dict[str, str]) -> str:
+        for key, value in protected.items():
+            segment = segment.replace(key, value)
+        return segment
+
+    def format_segment(segment: str) -> str:
+        segment, protected = protect_inline_code(segment)
+        segment = re.sub(r"\\\[(.*?)\\\]", display_formula, segment, flags=re.DOTALL)
+        segment = re.sub(r"\$\$(.*?)\$\$", display_formula, segment, flags=re.DOTALL)
+        segment = re.sub(r"\\\((.*?)\\\)", inline_formula, segment, flags=re.DOTALL)
+        segment = re.sub(r"(?<!\\)\$(.+?)(?<!\\)\$", inline_formula, segment, flags=re.DOTALL)
+        segment = re.sub(r"\\frac\{([^{}]+)\}\{([^{}]+)\}", fraction, segment)
+        segment = re.sub(r"\\sqrt\{([^{}]+)\}", sqrt, segment)
+
+        for raw, formatted in replacements.items():
+            segment = segment.replace(raw, formatted)
+
+        return restore_inline_code(segment, protected)
+
+    parts = re.split(r"(```.*?```)", text, flags=re.DOTALL)
+    text = "".join(part if part.startswith("```") else format_segment(part) for part in parts)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -279,6 +345,20 @@ def format_paragraphs_for_reading(text: str, indent: bool = True) -> str:
     blocks: List[str] = []
     current: List[str] = []
     in_code_block = False
+
+    def is_markdown_block_line(stripped: str) -> bool:
+        return any(
+            (
+                re.match(r"#{1,6}\s+", stripped),
+                re.match(r"[-*_]{3,}$", stripped),
+                re.match(r"[-*+]\s+", stripped),
+                re.match(r"\d+[.)]\s+", stripped),
+                re.match(r">\s?", stripped),
+                re.match(r"\|.*\|$", stripped),
+                re.match(r":?-{3,}:?(\s*\|\s*:?-{3,}:?)+$", stripped),
+                stripped.startswith("[公式]"),
+            )
+        )
 
     def flush_current() -> None:
         if current:
@@ -303,7 +383,7 @@ def format_paragraphs_for_reading(text: str, indent: bool = True) -> str:
             flush_current()
             continue
 
-        if stripped.startswith(("[公式]", "-", "*", "1.", "2.", "3.", "4.", "5.", ">")):
+        if is_markdown_block_line(stripped):
             flush_current()
             blocks.append(stripped)
             continue
@@ -311,7 +391,7 @@ def format_paragraphs_for_reading(text: str, indent: bool = True) -> str:
         current.append(stripped)
 
     flush_current()
-    return "\n\n".join(blocks).strip("\n")
+    return "\n".join(blocks).strip("\n")
 
 
 class DeepSeekChatApp:
@@ -335,8 +415,9 @@ class DeepSeekChatApp:
         )
         if self.model_name not in (DeepSeekClient.DEFAULT_MODEL, DeepSeekClient.FLASH_MODEL):
             self.model_name = DeepSeekClient.DEFAULT_MODEL
+        self.thinking_modes = self._load_thinking_modes()
         self.conversation_count = 0
-        self.result_queue: "queue.Queue[tuple[str, int, str, float, str]]" = queue.Queue()
+        self.result_queue: "queue.Queue[tuple[str, int, str, float, str, str, int]]" = queue.Queue()
         self.is_waiting = False
         self.dark_mode = str(self.app_config.get("theme") or "light") == "dark"
         self.sidebar_visible = True
@@ -344,6 +425,10 @@ class DeepSeekChatApp:
         self.display_entries: List[tuple[str, str, str]] = []
         self.sessions: List[Dict[str, Any]] = self._load_sessions_from_disk()
         self.active_session_index: Optional[int] = None
+        self.conversation_summary = ""
+        self.summarized_message_count = 0
+        self.link_count = 0
+        self.history_rows: List[tuple[tk.Frame, tk.Button, tk.Button]] = []
         self.style = ttk.Style()
 
         self._build_ui()
@@ -397,7 +482,7 @@ class DeepSeekChatApp:
 
         self.new_chat_button = tk.Button(
             self.sidebar,
-            text="+  新对话",
+            text="➕  新对话",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
@@ -441,69 +526,76 @@ class DeepSeekChatApp:
         )
         self.flash_button.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 14), ipady=8)
 
+        self.thinking_button = tk.Button(
+            self.sidebar,
+            text="🧠  思考：关闭",
+            relief=tk.FLAT,
+            bd=0,
+            anchor="w",
+            command=self.toggle_thinking_mode,
+        )
+        self.thinking_button.grid(row=6, column=0, sticky="ew", padx=10, pady=(0, 14), ipady=8)
+
         self.history_title = tk.Label(
             self.sidebar,
             text="对话记录",
             anchor="w",
             font=("Microsoft YaHei UI", 9),
         )
-        self.history_title.grid(row=6, column=0, sticky="ew", padx=16, pady=(4, 6))
+        self.history_title.grid(row=7, column=0, sticky="ew", padx=16, pady=(4, 6))
 
-        self.history_list = tk.Listbox(
+        self.history_frame = tk.Frame(
             self.sidebar,
-            height=10,
-            activestyle="none",
             bd=0,
             highlightthickness=0,
             relief=tk.FLAT,
-            font=("Microsoft YaHei UI", 10),
         )
-        self.history_list.grid(row=7, column=0, sticky="nsew", padx=10, pady=(0, 12))
-        self.history_list.bind("<<ListboxSelect>>", self.load_selected_session)
+        self.history_frame.grid(row=8, column=0, sticky="nsew", padx=10, pady=(0, 12))
+        self.history_frame.columnconfigure(0, weight=1)
 
         self.sidebar_spacer = tk.Frame(self.sidebar, bd=0, highlightthickness=0)
-        self.sidebar_spacer.grid(row=8, column=0, sticky="nsew")
-        self.sidebar.rowconfigure(7, weight=1)
+        self.sidebar_spacer.grid(row=9, column=0, sticky="nsew")
+        self.sidebar.rowconfigure(8, weight=1)
 
         self.theme_button = tk.Button(
             self.sidebar,
-            text="◐  主题",
+            text="🌗  主题",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.toggle_theme,
         )
-        self.theme_button.grid(row=9, column=0, sticky="ew", padx=10, pady=(0, 8), ipady=8)
+        self.theme_button.grid(row=10, column=0, sticky="ew", padx=10, pady=(0, 8), ipady=8)
 
         self.regenerate_button = tk.Button(
             self.sidebar,
-            text="↻  重新生成",
+            text="🔄  重新生成",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.regenerate_last,
         )
-        self.regenerate_button.grid(row=10, column=0, sticky="ew", padx=10, pady=(0, 6), ipady=8)
+        self.regenerate_button.grid(row=11, column=0, sticky="ew", padx=10, pady=(0, 6), ipady=8)
 
         self.save_button = tk.Button(
             self.sidebar,
-            text="⇩  保存 .txt",
+            text="💾  保存 .txt",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.save_transcript,
         )
-        self.save_button.grid(row=11, column=0, sticky="ew", padx=10, pady=(0, 6), ipady=8)
+        self.save_button.grid(row=12, column=0, sticky="ew", padx=10, pady=(0, 6), ipady=8)
 
         self.clear_button = tk.Button(
             self.sidebar,
-            text="⌧  清屏",
+            text="🧹  清屏",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.clear_chat,
         )
-        self.clear_button.grid(row=12, column=0, sticky="ew", padx=10, pady=(0, 18), ipady=8)
+        self.clear_button.grid(row=13, column=0, sticky="ew", padx=10, pady=(0, 18), ipady=8)
 
         self.content_frame = tk.Frame(self.main_frame, bd=0, highlightthickness=0)
         self.content_frame.grid(row=0, column=1, sticky="nsew")
@@ -558,9 +650,9 @@ class DeepSeekChatApp:
             rmargin=22,
             lmargin1=120,
             lmargin2=120,
-            spacing1=8,
-            spacing2=4,
-            spacing3=18,
+            spacing1=CHAT_LINE_SPACING["message_before"],
+            spacing2=CHAT_LINE_SPACING["message_wrap"],
+            spacing3=CHAT_LINE_SPACING["message_after"],
             font=CHAT_BODY_FONT,
         )
         self.chat_area.tag_configure(
@@ -569,16 +661,17 @@ class DeepSeekChatApp:
             lmargin1=22,
             lmargin2=22,
             rmargin=72,
-            spacing1=8,
-            spacing2=5,
-            spacing3=18,
+            spacing1=CHAT_LINE_SPACING["message_before"],
+            spacing2=CHAT_LINE_SPACING["message_wrap"],
+            spacing3=CHAT_LINE_SPACING["message_after"],
             font=CHAT_BODY_FONT,
         )
         self.chat_area.tag_configure(
             "system",
             justify=tk.CENTER,
-            spacing1=4,
-            spacing3=12,
+            spacing1=CHAT_LINE_SPACING["system_before"],
+            spacing2=CHAT_LINE_SPACING["system_wrap"],
+            spacing3=CHAT_LINE_SPACING["system_after"],
             font=CHAT_META_FONT,
         )
         self.chat_area.tag_configure(
@@ -587,11 +680,24 @@ class DeepSeekChatApp:
             lmargin1=22,
             lmargin2=22,
             rmargin=72,
-            spacing1=8,
-            spacing2=5,
-            spacing3=18,
+            spacing1=CHAT_LINE_SPACING["message_before"],
+            spacing2=CHAT_LINE_SPACING["message_wrap"],
+            spacing3=CHAT_LINE_SPACING["message_after"],
             font=CHAT_BODY_FONT,
         )
+        self.chat_area.tag_configure("md_speaker", font=CHAT_META_FONT)
+        self.chat_area.tag_configure("md_heading", font=CHAT_HEADING_FONT)
+        self.chat_area.tag_configure("md_bold", font=CHAT_BODY_BOLD_FONT)
+        self.chat_area.tag_configure("md_italic", font=CHAT_BODY_ITALIC_FONT)
+        self.chat_area.tag_configure("md_bold_italic", font=CHAT_BODY_BOLD_ITALIC_FONT)
+        self.chat_area.tag_configure("md_strike", overstrike=1)
+        self.chat_area.tag_configure("md_code", font=CHAT_CODE_FONT)
+        self.chat_area.tag_configure("md_table", font=CHAT_TABLE_FONT)
+        self.chat_area.tag_configure("md_sup", font=CHAT_SUPSUB_FONT, offset=5)
+        self.chat_area.tag_configure("md_sub", font=CHAT_SUPSUB_FONT, offset=-3)
+        self.chat_area.tag_configure("md_link", underline=1)
+        self.chat_area.tag_configure("md_emoji", font=CHAT_EMOJI_FONT)
+        self.chat_area.tag_configure("md_separator", font=CHAT_META_FONT)
 
         self.status_label = tk.Label(
             self.content_frame,
@@ -613,6 +719,9 @@ class DeepSeekChatApp:
             relief=tk.FLAT,
             padx=14,
             pady=12,
+            spacing1=CHAT_LINE_SPACING["input_before"],
+            spacing2=CHAT_LINE_SPACING["input_wrap"],
+            spacing3=CHAT_LINE_SPACING["input_after"],
         )
         self.input_box.grid(row=0, column=0, sticky="ew")
         self.input_box.bind("<Control-Return>", self._send_from_event)
@@ -649,11 +758,208 @@ class DeepSeekChatApp:
         entry = f"{speaker}:\n{text.strip()}\n\n"
         self.transcript.append(entry.strip())
         self.display_entries.append((speaker, text.strip(), tag))
-        self._insert_chat_entry(entry, tag)
+        self._insert_chat_entry(speaker, text, tag)
 
-    def _insert_chat_entry(self, entry: str, tag: str) -> None:
+    def _insert_with_tags(self, text: str, base_tag: str, *extra_tags: str) -> None:
+        tags = tuple(tag for tag in (base_tag, *extra_tags) if tag)
+        if "md_emoji" in tags or "md_code" in tags:
+            self.chat_area.insert(tk.END, text, tags)
+            return
+
+        position = 0
+        for match in EMOJI_PATTERN.finditer(text):
+            if match.start() > position:
+                self.chat_area.insert(tk.END, text[position : match.start()], tags)
+            self.chat_area.insert(tk.END, match.group(0), (*tags, "md_emoji"))
+            position = match.end()
+        if position < len(text):
+            self.chat_area.insert(tk.END, text[position:], tags)
+
+    def _insert_link(self, label: str, url: str, base_tag: str, *extra_tags: str) -> None:
+        if url.startswith("www."):
+            url = f"https://{url}"
+        self.link_count += 1
+        link_tag = f"md_link_{self.link_count}"
+        self._insert_with_tags(label, base_tag, *extra_tags, "md_link", link_tag)
+        self.chat_area.tag_bind(link_tag, "<Button-1>", lambda _event, target=url: webbrowser.open(target))
+        self.chat_area.tag_bind(link_tag, "<Enter>", lambda _event: self.chat_area.configure(cursor="hand2"))
+        self.chat_area.tag_bind(link_tag, "<Leave>", lambda _event: self.chat_area.configure(cursor=""))
+
+    def _display_width(self, text: str) -> int:
+        width = 0
+        for char in text:
+            code = ord(char)
+            if EMOJI_PATTERN.match(char):
+                width += 2
+            elif (
+                0x1100 <= code <= 0x11FF
+                or 0x2E80 <= code <= 0xA4CF
+                or 0xAC00 <= code <= 0xD7A3
+                or 0xF900 <= code <= 0xFAFF
+                or 0xFE10 <= code <= 0xFE19
+                or 0xFE30 <= code <= 0xFE6F
+                or 0xFF00 <= code <= 0xFF60
+                or 0xFFE0 <= code <= 0xFFE6
+            ):
+                width += 2
+            else:
+                width += 1
+        return width
+
+    def _pad_display(self, text: str, width: int) -> str:
+        return text + " " * max(0, width - self._display_width(text))
+
+    def _is_table_separator(self, line: str) -> bool:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        return bool(cells) and all(re.match(r"^:?-{3,}:?$", cell) for cell in cells)
+
+    def _is_table_line(self, line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+    def _format_table_lines(self, lines: List[str]) -> List[str]:
+        rows = [[cell.strip() for cell in line.strip().strip("|").split("|")] for line in lines]
+        if not rows:
+            return []
+
+        column_count = max(len(row) for row in rows)
+        for row in rows:
+            row.extend([""] * (column_count - len(row)))
+
+        widths = [0] * column_count
+        for row in rows:
+            if all(re.match(r"^:?-{3,}:?$", cell) for cell in row):
+                continue
+            for index, cell in enumerate(row):
+                widths[index] = max(widths[index], self._display_width(cell))
+
+        formatted: List[str] = []
+        for row in rows:
+            if all(re.match(r"^:?-{3,}:?$", cell) for cell in row):
+                formatted.append("| " + " | ".join("-" * widths[index] for index in range(column_count)) + " |")
+            else:
+                formatted.append(
+                    "| "
+                    + " | ".join(
+                        self._pad_display(cell, widths[index]) for index, cell in enumerate(row)
+                    )
+                    + " |"
+                )
+        return formatted
+
+    def _insert_table(self, lines: List[str], base_tag: str) -> None:
+        for line in self._format_table_lines(lines):
+            self._insert_with_tags(f"{line}\n", base_tag, "md_table")
+
+    def _insert_inline_markdown(self, line: str, base_tag: str, *extra_tags: str) -> None:
+        pattern = re.compile(
+            r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)"
+            r"|\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)"
+            r"|<((?:https?|mailto):[^>\s]+)>"
+            r"|(?<![<(\"])\b((?:https?://|www\.)[^\s<>()]+)"
+            r"|(?<![@\w:/.-])((?:[a-zA-Z0-9-]+\.)+(?:com|org|net|edu|gov|io|ai|cn|dev|app|co|uk|jp|de|fr|ru|info|me|xyz|site|tech|top|wiki|news|blog)(?:/[^\s<>()]*)?)"
+            r"|<sup>(.*?)</sup>"
+            r"|<sub>(.*?)</sub>"
+            r"|`([^`\n]+)`"
+            r"|\*\*\*(.+?)\*\*\*"
+            r"|\*\*(.+?)\*\*"
+            r"|(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)"
+            r"|~~(.+?)~~",
+            re.IGNORECASE,
+        )
+        position = 0
+        for match in pattern.finditer(line):
+            if match.start() > position:
+                self._insert_with_tags(line[position : match.start()], base_tag, *extra_tags)
+
+            if match.group(1) is not None:
+                label = match.group(1).strip() or "图片"
+                self._insert_link(f"图片: {label}", match.group(2), base_tag, *extra_tags)
+            elif match.group(3) is not None:
+                self._insert_link(match.group(3), match.group(4), base_tag, *extra_tags)
+            elif match.group(5) is not None:
+                self._insert_link(match.group(5), match.group(5), base_tag, *extra_tags)
+            elif match.group(6) is not None:
+                raw_url = match.group(6)
+                trailing = ""
+                while raw_url and raw_url[-1] in ".,;:!?)]}，。；：！？）】":
+                    trailing = raw_url[-1] + trailing
+                    raw_url = raw_url[:-1]
+                self._insert_link(raw_url, raw_url, base_tag, *extra_tags)
+                if trailing:
+                    self._insert_with_tags(trailing, base_tag, *extra_tags)
+            elif match.group(7) is not None:
+                raw_url = match.group(7)
+                trailing = ""
+                while raw_url and raw_url[-1] in ".,;:!?)]}，。；：！？）】":
+                    trailing = raw_url[-1] + trailing
+                    raw_url = raw_url[:-1]
+                self._insert_link(raw_url, raw_url, base_tag, *extra_tags)
+                if trailing:
+                    self._insert_with_tags(trailing, base_tag, *extra_tags)
+            elif match.group(8) is not None:
+                self._insert_with_tags(match.group(8), base_tag, *extra_tags, "md_sup")
+            elif match.group(9) is not None:
+                self._insert_with_tags(match.group(9), base_tag, *extra_tags, "md_sub")
+            elif match.group(10) is not None:
+                self._insert_with_tags(match.group(10), base_tag, *extra_tags, "md_code")
+            elif match.group(11) is not None:
+                self._insert_with_tags(match.group(11), base_tag, *extra_tags, "md_bold_italic")
+            elif match.group(12) is not None:
+                self._insert_with_tags(match.group(12), base_tag, *extra_tags, "md_bold")
+            elif match.group(13) is not None:
+                self._insert_with_tags(match.group(13), base_tag, *extra_tags, "md_italic")
+            elif match.group(14) is not None:
+                self._insert_with_tags(match.group(14), base_tag, *extra_tags, "md_strike")
+            position = match.end()
+
+        if position < len(line):
+            self._insert_with_tags(line[position:], base_tag, *extra_tags)
+
+    def _insert_chat_entry(self, speaker: str, text: str, tag: str) -> None:
         self.chat_area.configure(state=tk.NORMAL)
-        self.chat_area.insert(tk.END, entry, tag)
+        self._insert_with_tags(f"{speaker}:\n", tag, "md_speaker")
+
+        in_code_block = False
+        table_lines: List[str] = []
+
+        def flush_table() -> None:
+            if table_lines:
+                self._insert_table(table_lines, tag)
+                table_lines.clear()
+
+        for line in text.strip().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                flush_table()
+                in_code_block = not in_code_block
+                continue
+
+            if in_code_block:
+                self._insert_with_tags(f"{line}\n", tag, "md_code")
+                continue
+
+            if self._is_table_line(stripped):
+                table_lines.append(stripped)
+                continue
+
+            flush_table()
+
+            heading = re.match(r"#{1,6}\s+(.+)$", stripped)
+            if heading:
+                self._insert_inline_markdown(heading.group(1), tag, "md_heading")
+                self._insert_with_tags("\n", tag, "md_heading")
+                continue
+
+            if re.match(r"[-*_]{3,}$", stripped):
+                self._insert_with_tags("─" * 42 + "\n", tag, "md_separator")
+                continue
+
+            self._insert_inline_markdown(line, tag)
+            self._insert_with_tags("\n", tag)
+
+        flush_table()
+        self._insert_with_tags("\n", tag)
         self.chat_area.configure(state=tk.DISABLED)
         self.chat_area.see(tk.END)
 
@@ -662,8 +968,33 @@ class DeepSeekChatApp:
         self.chat_area.delete("1.0", tk.END)
         self.chat_area.configure(state=tk.DISABLED)
         for speaker, text, tag in self.display_entries:
-            entry = f"{speaker}:\n{text.strip()}\n\n"
-            self._insert_chat_entry(entry, tag)
+            self._insert_chat_entry(speaker, text, tag)
+
+    def _configure_hover_button(
+        self,
+        button: tk.Button,
+        normal_bg: str,
+        hover_bg: str,
+        normal_fg: str,
+        hover_fg: Optional[str] = None,
+    ) -> None:
+        hover_fg = hover_fg or normal_fg
+        button.configure(
+            bg=normal_bg,
+            fg=normal_fg,
+            activebackground=hover_bg,
+            activeforeground=hover_fg,
+        )
+
+        def on_enter(_event: tk.Event) -> None:
+            if str(button.cget("state")) != tk.DISABLED:
+                button.configure(bg=hover_bg, fg=hover_fg, cursor="hand2")
+
+        def on_leave(_event: tk.Event) -> None:
+            button.configure(bg=normal_bg, fg=normal_fg, cursor="")
+
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
 
     def _has_real_chat(self) -> bool:
         return any(message.get("role") != "system" for message in self.messages)
@@ -686,6 +1017,8 @@ class DeepSeekChatApp:
             "display_entries": list(self.display_entries),
             "conversation_count": self.conversation_count,
             "model_name": self.model_name,
+            "conversation_summary": self.conversation_summary,
+            "summarized_message_count": self.summarized_message_count,
         }
         if self.active_session_index is None:
             self.sessions.insert(0, session)
@@ -707,6 +1040,52 @@ class DeepSeekChatApp:
             return []
         return [session for session in data if isinstance(session, dict)]
 
+    def _load_thinking_modes(self) -> Dict[str, str]:
+        raw_modes = self.app_config.get("thinking_modes")
+        modes = raw_modes if isinstance(raw_modes, dict) else {}
+        return {
+            DeepSeekClient.DEFAULT_MODEL: self._normalize_thinking_mode(
+                str(modes.get(DeepSeekClient.DEFAULT_MODEL) or "disabled")
+            ),
+            DeepSeekClient.FLASH_MODEL: self._normalize_thinking_mode(
+                str(modes.get(DeepSeekClient.FLASH_MODEL) or "disabled")
+            ),
+        }
+
+    def _normalize_thinking_mode(self, mode: str) -> str:
+        return mode if mode in ("disabled", "high", "max") else "disabled"
+
+    def _current_thinking_mode(self) -> str:
+        return self._normalize_thinking_mode(
+            self.thinking_modes.get(self.model_name, "disabled")
+        )
+
+    def _thinking_mode_label(self) -> str:
+        mode = self._current_thinking_mode()
+        labels = {
+            "disabled": "关闭",
+            "high": "High",
+            "max": "Max",
+        }
+        return labels[mode]
+
+    def toggle_thinking_mode(self) -> None:
+        if self.is_waiting:
+            return
+
+        next_modes = {
+            "disabled": "high",
+            "high": "max",
+            "max": "disabled",
+        }
+        self.thinking_modes[self.model_name] = next_modes[self._current_thinking_mode()]
+        self.app_config["thinking_modes"] = dict(self.thinking_modes)
+        save_config(self.app_config)
+        self._refresh_model_display()
+        self.status_label.configure(
+            text=f"{self.model_name} thinking mode: {self._thinking_mode_label()}"
+        )
+
     def _write_sessions_to_disk(self) -> None:
         ensure_runtime_files()
         SESSIONS_PATH.write_text(
@@ -715,14 +1094,37 @@ class DeepSeekChatApp:
         )
 
     def _refresh_history_list(self) -> None:
-        self.history_list.delete(0, tk.END)
+        for row, _title_button, _delete_button in self.history_rows:
+            row.destroy()
+        self.history_rows = []
+
         for index, session in enumerate(self.sessions):
-            marker = "● " if index == self.active_session_index else "  "
-            self.history_list.insert(tk.END, f"{marker}{session['title']}")
-        if self.active_session_index is not None and self.active_session_index < len(self.sessions):
-            self.history_list.selection_clear(0, tk.END)
-            self.history_list.selection_set(self.active_session_index)
-            self.history_list.see(self.active_session_index)
+            row = tk.Frame(self.history_frame, bd=0, highlightthickness=0)
+            row.grid(row=index, column=0, sticky="ew", pady=(0, 4))
+            row.columnconfigure(0, weight=1)
+            marker = "● " if index == self.active_session_index else ""
+            title_button = tk.Button(
+                row,
+                text=f"{marker}{session.get('title', '未命名对话')}",
+                relief=tk.FLAT,
+                bd=0,
+                anchor="w",
+                font=("Microsoft YaHei UI", 10),
+                command=lambda session_index=index: self.load_session_by_index(session_index),
+            )
+            title_button.grid(row=0, column=0, sticky="ew")
+            delete_button = tk.Button(
+                row,
+                text="×",
+                width=2,
+                relief=tk.FLAT,
+                bd=0,
+                font=("Segoe UI", 10, "bold"),
+                command=lambda session_index=index: self.delete_session_by_index(session_index),
+            )
+            delete_button.grid(row=0, column=1, sticky="e")
+            self.history_rows.append((row, title_button, delete_button))
+        self.apply_theme()
 
     def new_chat(self) -> None:
         if self.is_waiting:
@@ -733,21 +1135,21 @@ class DeepSeekChatApp:
         self.messages = [{"role": "system", "content": self.system_prompt}]
         self.transcript = []
         self.display_entries = []
+        self.conversation_summary = ""
+        self.summarized_message_count = 0
         self.conversation_count = 0
         self.status_label.configure(text="Ready")
         self._append_chat("System", "新对话已开始。Enter 发送，Shift+Enter 换行。", "system")
         self._refresh_history_list()
         self._render_current_chat()
 
-    def load_selected_session(self, _event: tk.Event) -> None:
+    def load_session_by_index(self, target_index: int) -> None:
         if self.is_waiting:
             return
 
-        selection = self.history_list.curselection()
-        if not selection:
+        if target_index < 0 or target_index >= len(self.sessions):
             return
 
-        target_index = int(selection[0])
         if target_index == self.active_session_index:
             return
 
@@ -762,39 +1164,46 @@ class DeepSeekChatApp:
         self.display_entries = list(session["display_entries"])
         self.conversation_count = int(session["conversation_count"])
         self.model_name = str(session["model_name"])
+        self.conversation_summary = str(session.get("conversation_summary") or "")
+        self.summarized_message_count = int(session.get("summarized_message_count") or 0)
         self.status_label.configure(text=f"Loaded - {session['title']}")
         self._refresh_history_list()
         self._refresh_model_display()
         self._render_current_chat()
 
+    def load_selected_session(self, _event: tk.Event) -> None:
+        return
+
     def apply_theme(self) -> None:
         if self.dark_mode:
-            page_bg = "#212121"
-            sidebar_bg = "#171717"
-            chat_bg = "#212121"
-            input_bg = "#2f2f2f"
+            page_bg = "#202124"
+            sidebar_bg = "#16181c"
+            chat_bg = "#24262a"
+            input_bg = "#30343a"
             fg = "#ececec"
             muted = "#b4b4b4"
-            border = "#3f3f3f"
-            button_bg = "#171717"
-            button_hover = "#2f2f2f"
-            selected_bg = "#2f2f2f"
+            border = "#41464d"
+            button_bg = "#202328"
+            button_hover = "#343941"
+            selected_bg = "#303640"
             accent_bg = "#ececec"
+            accent_hover = "#ffffff"
             send_fg = "#111111"
             accent_fg = "#ffffff"
             insert = "#ffffff"
         else:
-            page_bg = "#ffffff"
-            sidebar_bg = "#f9f9f9"
+            page_bg = "#f4f6f8"
+            sidebar_bg = "#e8edf3"
             chat_bg = "#ffffff"
-            input_bg = "#ffffff"
+            input_bg = "#eef2f6"
             fg = "#111111"
             muted = "#676767"
-            border = "#d9d9d9"
-            button_bg = "#f9f9f9"
-            button_hover = "#ececec"
-            selected_bg = "#ececec"
+            border = "#cfd7e2"
+            button_bg = "#eef2f6"
+            button_hover = "#dfe7f0"
+            selected_bg = "#d8e1ec"
             accent_bg = "#111111"
+            accent_hover = "#2d3748"
             send_fg = "#ffffff"
             accent_fg = "#ffffff"
             insert = "#111111"
@@ -809,31 +1218,45 @@ class DeepSeekChatApp:
         self.composer_frame.configure(bg=input_bg, highlightbackground=border, highlightcolor=border)
 
         self.brand_label.configure(bg=sidebar_bg, fg=fg)
+        self._configure_hover_button(self.sidebar_close_button, button_bg, button_hover, fg)
         self.sidebar_close_button.configure(
-            bg=button_bg,
-            fg=fg,
-            activebackground=button_hover,
-            activeforeground=fg,
             highlightbackground=sidebar_bg,
             highlightcolor=fg,
         )
+        self._configure_hover_button(self.sidebar_open_button, page_bg, button_hover, fg)
         self.sidebar_open_button.configure(
-            bg=page_bg,
-            fg=fg,
-            activebackground=button_hover,
-            activeforeground=fg,
             highlightbackground=page_bg,
             highlightcolor=fg,
         )
         self.model_title.configure(bg=sidebar_bg, fg=muted)
         self.model_label.configure(bg=sidebar_bg, fg=fg)
         self.history_title.configure(bg=sidebar_bg, fg=muted)
-        self.history_list.configure(
-            bg=sidebar_bg,
-            fg=fg,
-            selectbackground=selected_bg,
-            selectforeground=fg,
-        )
+        self.history_frame.configure(bg=sidebar_bg)
+        for index, (row, title_button, delete_button) in enumerate(self.history_rows):
+            selected = index == self.active_session_index
+            row_bg = selected_bg if selected else sidebar_bg
+            row.configure(bg=row_bg)
+            self._configure_hover_button(
+                title_button,
+                row_bg,
+                button_hover,
+                fg,
+            )
+            title_button.configure(
+                highlightbackground=row_bg,
+                highlightcolor=fg,
+            )
+            self._configure_hover_button(
+                delete_button,
+                row_bg,
+                button_hover,
+                muted,
+                fg,
+            )
+            delete_button.configure(
+                highlightbackground=row_bg,
+                highlightcolor=fg,
+            )
         self.title_label.configure(bg=page_bg, fg=fg)
         self.model_badge.configure(bg=selected_bg, fg=muted)
         self.status_label.configure(bg=page_bg, fg=muted)
@@ -841,20 +1264,19 @@ class DeepSeekChatApp:
         self.style.configure("TFrame", background=page_bg)
         self.style.configure("TLabel", background=page_bg, foreground=fg)
         self.style.configure("TButton", padding=4)
+        self._configure_hover_button(self.theme_button, button_bg, button_hover, fg)
         self.theme_button.configure(
-            text="☀  浅色" if self.dark_mode else "◐  深色",
-            bg=button_bg,
-            fg=fg,
-            activebackground=button_hover,
-            activeforeground=fg,
+            text="☀️  浅色" if self.dark_mode else "🌙  深色",
             highlightbackground=sidebar_bg,
             highlightcolor=fg,
         )
+        self._configure_hover_button(self.new_chat_button, button_bg, button_hover, fg)
         self.new_chat_button.configure(
-            bg=button_bg,
-            fg=fg,
-            activebackground=button_hover,
-            activeforeground=fg,
+            highlightbackground=sidebar_bg,
+            highlightcolor=fg,
+        )
+        self._configure_hover_button(self.thinking_button, button_bg, button_hover, fg)
+        self.thinking_button.configure(
             highlightbackground=sidebar_bg,
             highlightcolor=fg,
         )
@@ -866,11 +1288,13 @@ class DeepSeekChatApp:
                 button is self.flash_button
                 and self.model_name == DeepSeekClient.FLASH_MODEL
             )
+            self._configure_hover_button(
+                button,
+                selected_bg if selected else button_bg,
+                button_hover,
+                fg,
+            )
             button.configure(
-                bg=selected_bg if selected else button_bg,
-                fg=fg,
-                activebackground=button_hover,
-                activeforeground=fg,
                 disabledforeground="#777777",
                 highlightbackground=sidebar_bg,
                 highlightcolor=fg,
@@ -880,25 +1304,46 @@ class DeepSeekChatApp:
             self.save_button,
             self.clear_button,
         ):
+            self._configure_hover_button(button, button_bg, button_hover, fg)
             button.configure(
-                bg=button_bg,
-                fg=fg,
-                activebackground=button_hover,
-                activeforeground=fg,
                 disabledforeground="#777777",
                 highlightbackground=sidebar_bg,
                 highlightcolor=fg,
             )
+        self._configure_hover_button(
+            self.send_button,
+            accent_bg,
+            accent_hover,
+            send_fg,
+            send_fg,
+        )
         self.send_button.configure(
-            bg=accent_bg,
-            fg=send_fg,
-            activebackground=button_hover,
-            activeforeground=fg,
             disabledforeground="#c7ccd4",
             highlightbackground=input_bg,
             highlightcolor=accent_bg,
         )
         self.chat_area.configure(bg=chat_bg, fg=fg, insertbackground=insert)
+        self.chat_area.tag_configure("md_speaker", foreground=muted)
+        self.chat_area.tag_configure("md_heading", foreground=fg)
+        self.chat_area.tag_configure("md_bold", foreground=fg)
+        self.chat_area.tag_configure("md_italic", foreground=fg)
+        self.chat_area.tag_configure("md_bold_italic", foreground=fg)
+        self.chat_area.tag_configure("md_strike", foreground=muted)
+        self.chat_area.tag_configure(
+            "md_code",
+            foreground=fg,
+            background=selected_bg,
+        )
+        self.chat_area.tag_configure(
+            "md_table",
+            foreground=fg,
+            background=selected_bg,
+        )
+        self.chat_area.tag_configure("md_sup", foreground=fg)
+        self.chat_area.tag_configure("md_sub", foreground=fg)
+        self.chat_area.tag_configure("md_link", foreground="#8ab4f8" if self.dark_mode else "#0969da")
+        self.chat_area.tag_configure("md_emoji", foreground=fg)
+        self.chat_area.tag_configure("md_separator", foreground=muted)
         self.input_box.configure(bg=input_bg, fg=fg, insertbackground=insert)
         self._sync_sidebar_visibility()
 
@@ -926,6 +1371,7 @@ class DeepSeekChatApp:
     def _refresh_model_display(self) -> None:
         self.model_label.configure(text=self.model_name)
         self.model_badge.configure(text=self.model_name)
+        self.thinking_button.configure(text=f"🧠  思考：{self._thinking_mode_label()}")
         self.pro_button.configure(
             state=tk.DISABLED if self.model_name == DeepSeekClient.DEFAULT_MODEL else tk.NORMAL
         )
@@ -936,10 +1382,12 @@ class DeepSeekChatApp:
             self.pro_button.configure(state=tk.DISABLED)
             self.flash_button.configure(state=tk.DISABLED)
             self.new_chat_button.configure(state=tk.DISABLED)
+            self.thinking_button.configure(state=tk.DISABLED)
             self.regenerate_button.configure(state=tk.DISABLED)
             self.clear_button.configure(state=tk.DISABLED)
         else:
             self.new_chat_button.configure(state=tk.NORMAL)
+            self.thinking_button.configure(state=tk.NORMAL)
             self.regenerate_button.configure(state=tk.NORMAL)
             self.clear_button.configure(state=tk.NORMAL)
         self.apply_theme()
@@ -989,13 +1437,23 @@ class DeepSeekChatApp:
         self._append_chat(f"Conversation {turn_number} - You", user_text, "user")
         self.messages.append({"role": "user", "content": user_text})
 
-        self._start_request(turn_number, model_name, list(self.messages))
+        self._start_request(
+            turn_number,
+            model_name,
+            self._current_thinking_mode(),
+            list(self.messages),
+            self.conversation_summary,
+            self.summarized_message_count,
+        )
 
     def _start_request(
         self,
         turn_number: int,
         model_name: str,
+        thinking_mode: str,
         messages: List[Message],
+        conversation_summary: str,
+        summarized_message_count: int,
     ) -> None:
         self.is_waiting = True
         self.send_button.configure(state=tk.DISABLED)
@@ -1006,7 +1464,14 @@ class DeepSeekChatApp:
 
         worker = threading.Thread(
             target=self._request_answer,
-            args=(turn_number, model_name, messages),
+            args=(
+                turn_number,
+                model_name,
+                thinking_mode,
+                messages,
+                conversation_summary,
+                summarized_message_count,
+            ),
             daemon=True,
         )
         worker.start()
@@ -1021,6 +1486,10 @@ class DeepSeekChatApp:
 
         if self.messages[-1]["role"] == "assistant":
             self.messages.pop()
+            self.summarized_message_count = min(
+                self.summarized_message_count,
+                max(0, len(self.messages) - 1),
+            )
 
         if self.messages[-1]["role"] != "user":
             messagebox.showinfo("无法重新生成", "请先发送一个问题。")
@@ -1034,7 +1503,14 @@ class DeepSeekChatApp:
             "重新生成上一条回复。",
             "system",
         )
-        self._start_request(turn_number, model_name, list(self.messages))
+        self._start_request(
+            turn_number,
+            model_name,
+            self._current_thinking_mode(),
+            list(self.messages),
+            self.conversation_summary,
+            self.summarized_message_count,
+        )
 
     def save_transcript(self) -> None:
         if not self.transcript:
@@ -1055,48 +1531,202 @@ class DeepSeekChatApp:
             file.write("\n")
         self.status_label.configure(text=f"Saved to {path}")
 
+    def delete_session_by_index(self, target_index: int) -> None:
+        if self.is_waiting:
+            return
+
+        if target_index < 0 or target_index >= len(self.sessions):
+            return
+
+        title = str(self.sessions[target_index].get("title") or "这条对话")
+        confirmed = messagebox.askyesno(
+            "删除历史记录",
+            f"确定删除「{title}」吗？\n\n此操作不可恢复。",
+            parent=self.root,
+        )
+        if not confirmed:
+            return
+
+        deleting_active = target_index == self.active_session_index
+        del self.sessions[target_index]
+
+        if deleting_active:
+            self.active_session_index = None
+            self.messages = [{"role": "system", "content": self.system_prompt}]
+            self.transcript = []
+            self.display_entries = []
+            self.conversation_summary = ""
+            self.summarized_message_count = 0
+            self.conversation_count = 0
+            self.chat_area.configure(state=tk.NORMAL)
+            self.chat_area.delete("1.0", tk.END)
+            self.chat_area.configure(state=tk.DISABLED)
+            self._append_chat("System", "历史记录已删除。Enter 发送，Shift+Enter 换行。", "system")
+            self.status_label.configure(text="Deleted selected conversation")
+        elif self.active_session_index is not None and target_index < self.active_session_index:
+            self.active_session_index -= 1
+            self.status_label.configure(text=f"Deleted - {title}")
+        else:
+            self.status_label.configure(text=f"Deleted - {title}")
+
+        self._write_sessions_to_disk()
+        self._refresh_history_list()
+        self._refresh_model_display()
+
+    def delete_selected_session(self) -> None:
+        if self.active_session_index is None:
+            messagebox.showinfo("无法删除", "请先在左侧选择一条历史记录。")
+            return
+        self.delete_session_by_index(self.active_session_index)
+
     def clear_chat(self) -> None:
         if self.is_waiting:
             return
 
         self.messages = [{"role": "system", "content": self.system_prompt}]
         self.transcript = []
+        self.display_entries = []
+        self.conversation_summary = ""
+        self.summarized_message_count = 0
         self.chat_area.configure(state=tk.NORMAL)
         self.chat_area.delete("1.0", tk.END)
         self.chat_area.configure(state=tk.DISABLED)
         self.status_label.configure(text="Ready")
         self._append_chat("System", "已清屏。Enter 发送，Shift+Enter 换行。", "system")
 
+    def _format_messages_for_summary(self, messages: List[Message]) -> str:
+        parts: List[str] = []
+        for message in messages:
+            role = str(message.get("role") or "unknown")
+            content = str(message.get("content") or "").strip()
+            if content:
+                parts.append(f"{role}: {content}")
+        return "\n\n".join(parts)
+
+    def _summarize_context(
+        self,
+        model_name: str,
+        existing_summary: str,
+        messages_to_summarize: List[Message],
+    ) -> str:
+        assert self.client is not None
+        old_summary = existing_summary.strip() or "无。"
+        new_context = self._format_messages_for_summary(messages_to_summarize)
+        prompt = (
+            f"已有摘要：\n{old_summary}\n\n"
+            f"需要并入摘要的旧对话：\n{new_context}\n\n"
+            "请输出更新后的摘要。"
+        )
+        response = self.client.chat(
+            messages=[
+                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            model=model_name,
+            thinking="disabled",
+            temperature=0.2,
+        )
+        return (response.choices[0].message.content or existing_summary).strip()
+
+    def _prepare_context_messages(
+        self,
+        model_name: str,
+        messages: List[Message],
+        summary: str,
+        summarized_count: int,
+    ) -> tuple[List[Message], str, int]:
+        if not messages:
+            return messages, summary, summarized_count
+
+        system_message = messages[0]
+        conversation_messages = messages[1:]
+        summarize_until = max(0, len(conversation_messages) - CONTEXT_RECENT_MESSAGE_COUNT)
+
+        if summarize_until - summarized_count >= SUMMARY_BATCH_MIN_MESSAGES:
+            summary = self._summarize_context(
+                model_name,
+                summary,
+                conversation_messages[summarized_count:summarize_until],
+            )
+            summarized_count = summarize_until
+
+        context_messages: List[Message] = [dict(system_message)]
+        if summary.strip():
+            context_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "此前较早对话的压缩摘要如下。回答时请把它作为长期上下文参考，"
+                        "同时优先遵循最近原文消息：\n"
+                        f"{summary.strip()}"
+                    ),
+                }
+            )
+        context_messages.extend(dict(message) for message in conversation_messages[summarized_count:])
+        return context_messages, summary, summarized_count
+
     def _request_answer(
         self,
         turn_number: int,
         model_name: str,
+        thinking_mode: str,
         messages: List[Message],
+        conversation_summary: str,
+        summarized_message_count: int,
     ) -> None:
         started_at = time.perf_counter()
         try:
             assert self.client is not None
+            context_messages, updated_summary, updated_count = self._prepare_context_messages(
+                model_name,
+                messages,
+                conversation_summary,
+                summarized_message_count,
+            )
             response = self.client.chat(
-                messages=messages,
+                messages=context_messages,
                 model=model_name,
-                thinking="disabled",
-                temperature=0.7,
+                thinking="disabled" if thinking_mode == "disabled" else "enabled",
+                reasoning_effort="high" if thinking_mode == "disabled" else thinking_mode,
+                temperature=0.7 if thinking_mode == "disabled" else None,
             )
             answer = response.choices[0].message.content or ""
             elapsed = time.perf_counter() - started_at
-            self.result_queue.put(("ok", turn_number, model_name, elapsed, answer))
+            self.result_queue.put(
+                ("ok", turn_number, model_name, elapsed, answer, updated_summary, updated_count)
+            )
         except Exception as exc:
             elapsed = time.perf_counter() - started_at
-            self.result_queue.put(("error", turn_number, model_name, elapsed, str(exc)))
+            self.result_queue.put(
+                (
+                    "error",
+                    turn_number,
+                    model_name,
+                    elapsed,
+                    str(exc),
+                    conversation_summary,
+                    summarized_message_count,
+                )
+            )
 
     def _poll_results(self) -> None:
         try:
-            status, turn_number, model_name, elapsed, payload = self.result_queue.get_nowait()
+            (
+                status,
+                turn_number,
+                model_name,
+                elapsed,
+                payload,
+                updated_summary,
+                updated_count,
+            ) = self.result_queue.get_nowait()
         except queue.Empty:
             self.root.after(100, self._poll_results)
             return
 
         if status == "ok":
+            self.conversation_summary = str(updated_summary or "")
+            self.summarized_message_count = int(updated_count or 0)
             self.messages.append({"role": "assistant", "content": payload})
             self._append_chat(
                 f"Conversation {turn_number} - DeepSeek ({model_name}, {elapsed:.2f}s)",

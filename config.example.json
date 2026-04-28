@@ -2,6 +2,10 @@
   "DEEPSEEK_API_KEY": "",
   "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
   "default_model": "deepseek-v4-pro",
+  "thinking_modes": {
+    "deepseek-v4-pro": "disabled",
+    "deepseek-v4-flash": "disabled"
+  },
   "theme": "light",
   "window_geometry": "980x680"
 }

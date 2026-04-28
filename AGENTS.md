@@ -29,6 +29,30 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 - Streaming response handling through a worker thread and UI polling queue.
 - Basic formatting helpers for Markdown/LaTeX-like math text in the Tk text
   widget.
+- Tuned chat and input text line spacing for compact, readable Chinese text.
+- GUI buttons have hover feedback, and the sidebar, chat area, and input area
+  use distinct light/dark surface colors.
+- Markdown-aware reply formatting preserves headings, separators, lists, tables,
+  quotes, code fences, and inline code examples without adding paragraph
+  indentation.
+- Chat output renders common Markdown styles in the Tk text widget, including
+  headings, bold/italic/strikethrough text, inline code, fenced code,
+  separators, superscript/subscript HTML tags, and clickable links including
+  bare URLs.
+- Long conversations use summary memory: older messages are compressed into a
+  saved conversation summary while recent messages remain in full text for API
+  requests.
+- Sidebar history supports deleting a selected saved conversation with
+  confirmation and current-session reset when needed. Delete controls are placed
+  beside individual history rows.
+- Each DeepSeek V4 model has an independent thinking mode setting, switchable
+  between disabled, high, and max.
+- Chat rendering uses a dedicated emoji font tag for Unicode emoji in normal
+  message text.
+- Markdown table blocks are normalized by display width and rendered with a
+  dedicated table font for better Chinese/emoji column alignment.
+- Sidebar action buttons use emoji-leading labels for a more consistent visual
+  language.
 - Portable Windows build flow through `build_exe.ps1` and PyInstaller.
 
 ## Important Files
@@ -96,6 +120,35 @@ dist/DeepSeekChat/DeepSeekChat.exe
 - Added this `AGENTS.md` project notes file for future AI agents.
 - Added `WORKFLOW.md` with the expected inspect, edit, verify, and documentation
   update process for future agents.
+- Tuned GUI chat and input text line spacing in `deepseek_api_client.py` for
+  compact, readable Chinese text, and reduced extra blank lines in formatted
+  replies.
+- Added button hover feedback and clearer surface contrast between the sidebar,
+  chat display, and input composer.
+- Updated `WORKFLOW.md` with GUI-specific implementation and verification
+  guidance.
+- Improved Markdown detection in reply formatting so Markdown structure and code
+  examples are not mistaken for prose paragraphs.
+- Added lightweight Markdown rendering for chat output, including headings,
+  bold/italic/strikethrough text, inline code, fenced code, separators,
+  superscript/subscript HTML tags, image/link labels, autolinks, and browser
+  navigation for links.
+- Added summary-memory context handling: API requests include the system prompt,
+  a saved summary of older turns, and recent full messages instead of always
+  sending the full conversation history.
+- Added sidebar history deletion with confirmation and safe active-session
+  cleanup; deletion is now available beside each history record row.
+- Added Unicode emoji rendering support through a dedicated Tk text tag using
+  the system emoji font.
+- Added Markdown table block formatting that pads columns by display width and
+  renders tables with a dedicated table tag.
+- Added per-model thinking mode controls for `deepseek-v4-pro` and
+  `deepseek-v4-flash`, persisted in config and passed through the API request.
+- Updated sidebar action button labels to use emoji icons.
+- Added bare URL autolinking so received websites can be clicked directly and
+  opened in the default browser.
+- Extended autolinking for source-style trailing website references such as
+  `example.com/path` without an explicit protocol.
 - Current repository state observed:
   - Main implementation is concentrated in `deepseek_api_client.py`.
   - `ds_v4.py` is only a compatibility entrypoint.
