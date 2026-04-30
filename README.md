@@ -135,6 +135,23 @@ Local runtime data is not committed:
 
 Conversation sessions are saved in `conversations/sessions.json`.
 
+## Source Layout
+
+Run the desktop app through:
+
+```powershell
+python ds_v4.py
+```
+
+Key source files:
+
+- `ds_v4.py`: Stable compatibility entrypoint.
+- `deepseek_api_client.py`: Tkinter desktop UI and chat workflow.
+- `deepseek_client.py`: DeepSeek/OpenAI-compatible API wrapper.
+- `config_store.py`: Runtime paths, config, prompt, and session file locations.
+- `ui_text.py`: English and Chinese UI text.
+- `edge_extension/`: Unpacked Microsoft Edge extension prototype.
+
 ## Portable Windows Build
 
 To build a copyable Windows folder with an `.exe`:
@@ -160,5 +177,5 @@ dist/DeepSeekChat/config.json
 Feature changes require editing the Python source files and rebuilding the
 portable app.
 
-The compatibility entrypoint is `ds_v4.py`; the main application implementation
-lives in `deepseek_api_client.py`.
+The compatibility entrypoint is `ds_v4.py`; keep `python ds_v4.py` as the
+desktop launch command.

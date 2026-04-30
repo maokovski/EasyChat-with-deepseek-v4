@@ -11,7 +11,7 @@ Before making edits, also read `WORKFLOW.md` for the expected agent workflow.
 
 This is a small Windows-friendly Tkinter desktop chat client for DeepSeek's
 OpenAI-compatible chat API. The user-facing entrypoint is `ds_v4.py`, which
-re-exports and runs the implementation in `deepseek_api_client.py`.
+re-exports the compatibility surface from `deepseek_api_client.py`.
 
 ## Current Features
 
@@ -66,9 +66,14 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 
 ## Important Files
 
-- `deepseek_api_client.py`: Main application code. Contains runtime file setup,
-  config loading/saving, `DeepSeekClient`, formatting helpers, and
-  `DeepSeekChatApp`.
+- `deepseek_api_client.py`: Main Tkinter application code. Keeps public exports
+  for compatibility and contains `DeepSeekChatApp`, DPI setup, Markdown display
+  helpers, summary-memory orchestration, and GUI behavior.
+- `deepseek_client.py`: DeepSeek/OpenAI-compatible API wrapper, message typing,
+  and `DeepSeekV4Client` alias.
+- `config_store.py`: Runtime directory resolution, config loading/saving,
+  system prompt loading, and session file paths.
+- `ui_text.py`: English and Chinese UI text used by runtime language switching.
 - `ds_v4.py`: Compatibility entrypoint. Imports from `deepseek_api_client.py`
   and calls `main()` when executed.
 - `config.example.json`: Template config. Do not put real API keys in the repo.
@@ -85,7 +90,7 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 On startup, the app resolves its runtime directory differently depending on
 whether it is running from source or from a frozen executable:
 
-- Source run: the directory containing `deepseek_api_client.py`.
+- Source run: the directory containing `config_store.py`.
 - PyInstaller build: the directory containing the executable.
 
 The app ensures these runtime files exist:
@@ -159,7 +164,7 @@ dist/DeepSeekChat/DeepSeekChat.exe
 - Extended autolinking for source-style trailing website references such as
   `example.com/path` without an explicit protocol.
 - Current repository state observed:
-  - Main implementation is concentrated in `deepseek_api_client.py`.
+  - Main desktop UI implementation is concentrated in `deepseek_api_client.py`.
   - `ds_v4.py` is only a compatibility entrypoint.
   - `edge_extension/` contains the browser extension prototype for the `edge`
     branch.
@@ -192,6 +197,11 @@ dist/DeepSeekChat/DeepSeekChat.exe
 - Expanded the Edge extension `Use Page` action so it injects a script into the
   active tab and captures visible page text plus common interactive elements,
   not only the title, URL, and selected text.
+- Split low-risk support code out of `deepseek_api_client.py`: runtime config
+  and paths now live in `config_store.py`, the API wrapper lives in
+  `deepseek_client.py`, and language text lives in `ui_text.py`.
+- Updated `WORKFLOW.md` with the new source layout and expanded Python compile
+  verification command.
 
 ## Agent Guidelines
 
