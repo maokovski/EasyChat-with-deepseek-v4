@@ -54,6 +54,11 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 - Sidebar action buttons use emoji-leading labels for a more consistent visual
   language.
 - Portable Windows build flow through `build_exe.ps1` and PyInstaller.
+- A compact API settings subwindow is available from the top bar for editing
+  the DeepSeek API key and base URL without manually opening `config.json`.
+- The UI language can be switched at runtime between English and Chinese; source
+  files keep Chinese UI strings as escaped Unicode so literal Chinese characters
+  do not appear in project files.
 
 ## Important Files
 
@@ -154,6 +159,26 @@ dist/DeepSeekChat/DeepSeekChat.exe
   - `ds_v4.py` is only a compatibility entrypoint.
   - User secrets and generated runtime/build output are ignored by Git.
   - Packaging is documented and automated through `build_exe.ps1`.
+
+### 2026-04-30
+
+- Added a top-bar API Settings button that opens a compact Tkinter child window
+  for editing `DEEPSEEK_API_KEY` and `DEEPSEEK_BASE_URL`.
+- API settings are saved back to `config.json` and the DeepSeek client is
+  recreated immediately so the new credentials can be used without restarting.
+- Removed environment-variable fallback for API credentials; the app now
+  requires the API key from `config.json` or the API Settings window.
+- Added runtime language selection for English and Chinese while keeping source
+  and documentation files free of literal Chinese characters.
+- Replaced the chat and input body font with `Microsoft YaHei UI`, kept code and
+  tables on `Cascadia Mono`, and added Windows DPI/Tk scaling setup for clearer
+  text rendering on scaled displays.
+- Added a draggable sidebar resize handle and persisted the sidebar width in
+  `config.json`.
+- Refactored the Tkinter UI into a more polished workstation layout with
+  grouped sidebar panels, a bordered top toolbar, a framed chat surface, and
+  refreshed neutral/teal light and dark theme colors while preserving existing
+  chat, history, model, thinking, API, language, theme, and resize behavior.
 
 ## Agent Guidelines
 

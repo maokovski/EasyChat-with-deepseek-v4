@@ -15,6 +15,8 @@ OpenAI-compatible API.
   links, superscript/subscript, and emoji.
 - Clickable links open in the system default browser.
 - Light and dark themes.
+- Small top-bar API settings window for editing the DeepSeek API key and base URL.
+- Runtime language switching between English and Chinese.
 - Optional one-folder Windows executable build with PyInstaller.
 
 ## Requirements
@@ -57,7 +59,9 @@ Edit `config.json` and add your DeepSeek API key:
     "deepseek-v4-flash": "disabled"
   },
   "theme": "light",
-  "window_geometry": "980x680"
+  "language": "en",
+  "window_geometry": "980x680",
+  "sidebar_width": 218
 }
 ```
 
@@ -77,7 +81,12 @@ Git.
 - `default_model`: `deepseek-v4-pro` or `deepseek-v4-flash`.
 - `thinking_modes`: Per-model thinking mode, one of `disabled`, `high`, `max`.
 - `theme`: `light` or `dark`.
+- `language`: `en` or `zh`.
 - `window_geometry`: Initial Tkinter window size.
+- `sidebar_width`: Saved sidebar width in pixels.
+
+The same API key and base URL can also be edited from the top-bar API Settings
+button.
 
 The system prompt is stored in `prompts.txt`.
 

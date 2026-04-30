@@ -7,14 +7,12 @@ Install dependency:
     pip install openai
 
 Set API key before running:
-    PowerShell: $env:DEEPSEEK_API_KEY = "sk-..."
-    Bash:      export DEEPSEEK_API_KEY="sk-..."
+    Open API Settings in the app, or edit config.json next to the program.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import queue
 import re
 import sys
@@ -25,6 +23,7 @@ import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Any, Dict, Iterator, List, Literal, Optional
+from ctypes import windll
 
 from openai import OpenAI
 
@@ -56,7 +55,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "deepseek-v4-flash": "disabled",
     },
     "theme": "light",
+    "language": "en",
     "window_geometry": "980x680",
+    "sidebar_width": 218,
 }
 
 
@@ -64,7 +65,7 @@ def ensure_runtime_files() -> None:
     CONVERSATIONS_DIR.mkdir(exist_ok=True)
     if not CONFIG_PATH.exists():
         CONFIG_PATH.write_text(
-            json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2),
+            json.dumps(DEFAULT_CONFIG, ensure_ascii=True, indent=2),
             encoding="utf-8",
         )
     if not PROMPTS_PATH.exists():
@@ -83,7 +84,7 @@ def load_config() -> Dict[str, Any]:
 def save_config(config: Dict[str, Any]) -> None:
     ensure_runtime_files()
     CONFIG_PATH.write_text(
-        json.dumps({**DEFAULT_CONFIG, **config}, ensure_ascii=False, indent=2),
+        json.dumps({**DEFAULT_CONFIG, **config}, ensure_ascii=True, indent=2),
         encoding="utf-8",
     )
 
@@ -92,6 +93,24 @@ def load_system_prompt() -> str:
     ensure_runtime_files()
     prompt = PROMPTS_PATH.read_text(encoding="utf-8").strip()
     return prompt or "You are a helpful assistant."
+
+
+def configure_windows_dpi_awareness() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+def configure_tk_scaling(root: tk.Tk) -> None:
+    pixels_per_inch = root.winfo_fpixels("1i")
+    if pixels_per_inch > 0:
+        root.tk.call("tk", "scaling", pixels_per_inch / 72.0)
 
 
 class DeepSeekClient:
@@ -107,20 +126,15 @@ class DeepSeekClient:
         base_url: Optional[str] = None,
     ) -> None:
         config = load_config()
-        self.api_key = (
-            api_key
-            or str(config.get("DEEPSEEK_API_KEY") or "").strip()
-            or os.environ.get("DEEPSEEK_API_KEY")
-        )
+        self.api_key = api_key or str(config.get("DEEPSEEK_API_KEY") or "").strip()
         if not self.api_key:
             raise ValueError(
-                f"Missing DeepSeek API key. Fill {CONFIG_PATH.name} or set DEEPSEEK_API_KEY."
+                f"Missing DeepSeek API key. Open API Settings or fill {CONFIG_PATH.name}."
             )
 
         self.base_url = (
             base_url
             or str(config.get("DEEPSEEK_BASE_URL") or "").strip()
-            or os.environ.get("DEEPSEEK_BASE_URL")
             or self.DEFAULT_BASE_URL
         )
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
@@ -211,25 +225,122 @@ class DeepSeekClient:
 DeepSeekV4Client = DeepSeekClient
 
 
-CHAT_BODY_FONT = ("SimSun", 12)
-CHAT_BODY_BOLD_FONT = ("SimSun", 12, "bold")
-CHAT_BODY_ITALIC_FONT = ("SimSun", 12, "italic")
-CHAT_BODY_BOLD_ITALIC_FONT = ("SimSun", 12, "bold italic")
-CHAT_HEADING_FONT = ("Microsoft YaHei UI", 13, "bold")
-CHAT_CODE_FONT = ("Consolas", 11)
-CHAT_TABLE_FONT = ("Cascadia Mono", 10)
-CHAT_SUPSUB_FONT = ("SimSun", 9)
+CHAT_BODY_FONT = ("Microsoft YaHei UI", 12)
+CHAT_BODY_BOLD_FONT = ("Microsoft YaHei UI", 12, "bold")
+CHAT_BODY_ITALIC_FONT = ("Microsoft YaHei UI", 12, "italic")
+CHAT_BODY_BOLD_ITALIC_FONT = ("Microsoft YaHei UI", 12, "bold italic")
+CHAT_HEADING_FONT = ("Microsoft YaHei UI", 14, "bold")
+CHAT_CODE_FONT = ("Cascadia Mono", 11)
+CHAT_TABLE_FONT = ("Cascadia Mono", 11)
+CHAT_SUPSUB_FONT = ("Microsoft YaHei UI", 9)
 CHAT_EMOJI_FONT = ("Segoe UI Emoji", 12)
 CHAT_META_FONT = ("Microsoft YaHei UI", 9)
-INPUT_FONT = ("SimSun", 12)
+INPUT_FONT = ("Microsoft YaHei UI", 12)
 UI_FONT = ("Microsoft YaHei UI", 10)
 CONTEXT_RECENT_MESSAGE_COUNT = 10
 SUMMARY_BATCH_MIN_MESSAGES = 4
 SUMMARY_SYSTEM_PROMPT = (
-    "你是对话记忆整理器。请把旧对话压缩成一份简洁但信息充分的中文摘要，"
-    "保留用户目标、关键决定、项目约束、已完成修改、待办事项、重要事实和偏好。"
-    "不要添加原文中没有的信息。"
+    "You organize conversation memory. Compress older messages into a concise "
+    "but complete summary. Preserve user goals, key decisions, project "
+    "constraints, completed changes, todos, important facts, and preferences. "
+    "Do not add information that is not present in the original messages."
 )
+UI_TEXT = {
+    "en": {
+        "new_chat": "New Chat",
+        "current_model": "Current Model",
+        "thinking": "Thinking",
+        "thinking_off": "Off",
+        "history": "History",
+        "theme_light": "Light",
+        "theme_dark": "Dark",
+        "api_settings": "API Settings",
+        "regenerate": "Regenerate",
+        "save_txt": "Save .txt",
+        "clear": "Clear",
+        "initial_hint": "Type below. Enter sends, Shift+Enter inserts a new line.",
+        "image": "Image",
+        "new_session_title": "New chat",
+        "untitled_chat": "Untitled chat",
+        "new_chat_started": "New chat started. Enter sends, Shift+Enter inserts a new line.",
+        "please_wait": "Please Wait",
+        "api_busy": "A request is still running. Change API settings after it finishes.",
+        "api_key_missing_title": "DeepSeek API Key Missing",
+        "api_key_missing_body": "Please open API Settings or fill config.json next to this program.",
+        "api_saved_title": "API Settings Saved",
+        "api_saved_error": "Settings were saved, but the client could not start:",
+        "api_saved_ok": "API settings saved and applied.",
+        "api_required": "API Key is required before requests can be sent.",
+        "show_api_key": "Show API Key",
+        "cancel": "Cancel",
+        "save": "Save",
+        "cannot_regenerate": "Cannot Regenerate",
+        "no_regenerate_chat": "There is no conversation to regenerate yet.",
+        "send_first": "Please send a question first.",
+        "regenerate_notice": "Regenerating the previous answer.",
+        "nothing_to_save": "Nothing To Save",
+        "empty_session": "The current session has no content.",
+        "save_current_session": "Save Current Session",
+        "this_conversation": "this conversation",
+        "delete_history": "Delete History",
+        "delete_confirm": "Delete \"{title}\"?\n\nThis cannot be undone.",
+        "history_deleted": "History deleted. Enter sends, Shift+Enter inserts a new line.",
+        "cannot_delete": "Cannot Delete",
+        "select_history": "Select a history item on the left first.",
+        "cleared": "Cleared. Enter sends, Shift+Enter inserts a new line.",
+        "summary_none": "None.",
+        "summary_prompt": "Existing summary:\n{old_summary}\n\nOlder messages to merge:\n{new_context}\n\nOutput the updated summary.",
+        "summary_context": "A compressed summary of earlier messages follows. Use it as long-term context, while prioritizing the recent full messages:\n{summary}",
+        "language": "Language",
+    },
+    "zh": {
+        "new_chat": "\u65b0\u5bf9\u8bdd",
+        "current_model": "\u5f53\u524d\u6a21\u578b",
+        "thinking": "\u601d\u8003",
+        "thinking_off": "\u5173\u95ed",
+        "history": "\u5bf9\u8bdd\u8bb0\u5f55",
+        "theme_light": "\u6d45\u8272",
+        "theme_dark": "\u6df1\u8272",
+        "api_settings": "API \u8bbe\u7f6e",
+        "regenerate": "\u91cd\u65b0\u751f\u6210",
+        "save_txt": "\u4fdd\u5b58 .txt",
+        "clear": "\u6e05\u5c4f",
+        "initial_hint": "\u5728\u4e0b\u65b9\u8f93\u5165\u95ee\u9898\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
+        "image": "\u56fe\u7247",
+        "new_session_title": "\u65b0\u5bf9\u8bdd",
+        "untitled_chat": "\u672a\u547d\u540d\u5bf9\u8bdd",
+        "new_chat_started": "\u65b0\u5bf9\u8bdd\u5df2\u5f00\u59cb\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
+        "please_wait": "\u8bf7\u7a0d\u5019",
+        "api_busy": "\u5f53\u524d\u8bf7\u6c42\u8fd8\u5728\u8fdb\u884c\u4e2d\uff0c\u8bf7\u7ed3\u675f\u540e\u518d\u4fee\u6539 API \u8bbe\u7f6e\u3002",
+        "api_key_missing_title": "DeepSeek API Key \u7f3a\u5931",
+        "api_key_missing_body": "\u8bf7\u6253\u5f00 API \u8bbe\u7f6e\uff0c\u6216\u586b\u5199\u7a0b\u5e8f\u65c1\u7684 config.json\u3002",
+        "api_saved_title": "API \u8bbe\u7f6e\u5df2\u4fdd\u5b58",
+        "api_saved_error": "\u914d\u7f6e\u5df2\u4fdd\u5b58\uff0c\u4f46\u5ba2\u6237\u7aef\u521d\u59cb\u5316\u5931\u8d25\uff1a",
+        "api_saved_ok": "API \u8bbe\u7f6e\u5df2\u4fdd\u5b58\u5e76\u751f\u6548\u3002",
+        "api_required": "\u53d1\u9001\u8bf7\u6c42\u524d\u5fc5\u987b\u586b\u5199 API Key\u3002",
+        "show_api_key": "\u663e\u793a API Key",
+        "cancel": "\u53d6\u6d88",
+        "save": "\u4fdd\u5b58",
+        "cannot_regenerate": "\u65e0\u6cd5\u91cd\u65b0\u751f\u6210",
+        "no_regenerate_chat": "\u8fd8\u6ca1\u6709\u53ef\u4ee5\u91cd\u65b0\u751f\u6210\u7684\u5bf9\u8bdd\u3002",
+        "send_first": "\u8bf7\u5148\u53d1\u9001\u4e00\u4e2a\u95ee\u9898\u3002",
+        "regenerate_notice": "\u91cd\u65b0\u751f\u6210\u4e0a\u4e00\u6761\u56de\u590d\u3002",
+        "nothing_to_save": "\u65e0\u9700\u4fdd\u5b58",
+        "empty_session": "\u5f53\u524d\u4f1a\u8bdd\u6ca1\u6709\u5185\u5bb9\u3002",
+        "save_current_session": "\u4fdd\u5b58\u5f53\u524d\u4f1a\u8bdd",
+        "this_conversation": "\u8fd9\u6761\u5bf9\u8bdd",
+        "delete_history": "\u5220\u9664\u5386\u53f2\u8bb0\u5f55",
+        "delete_confirm": "\u786e\u5b9a\u5220\u9664\u300c{title}\u300d\u5417\uff1f\n\n\u6b64\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002",
+        "history_deleted": "\u5386\u53f2\u8bb0\u5f55\u5df2\u5220\u9664\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
+        "cannot_delete": "\u65e0\u6cd5\u5220\u9664",
+        "select_history": "\u8bf7\u5148\u5728\u5de6\u4fa7\u9009\u62e9\u4e00\u6761\u5386\u53f2\u8bb0\u5f55\u3002",
+        "cleared": "\u5df2\u6e05\u5c4f\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
+        "summary_none": "\u65e0\u3002",
+        "summary_prompt": "\u5df2\u6709\u6458\u8981\uff1a\n{old_summary}\n\n\u9700\u8981\u5e76\u5165\u6458\u8981\u7684\u65e7\u5bf9\u8bdd\uff1a\n{new_context}\n\n\u8bf7\u8f93\u51fa\u66f4\u65b0\u540e\u7684\u6458\u8981\u3002",
+        "summary_context": "\u6b64\u524d\u8f83\u65e9\u5bf9\u8bdd\u7684\u538b\u7f29\u6458\u8981\u5982\u4e0b\u3002\u56de\u7b54\u65f6\u8bf7\u628a\u5b83\u4f5c\u4e3a\u957f\u671f\u4e0a\u4e0b\u6587\u53c2\u8003\uff0c\u540c\u65f6\u4f18\u5148\u9075\u5faa\u6700\u8fd1\u539f\u6587\u6d88\u606f\uff1a\n{summary}",
+        "language": "\u8bed\u8a00",
+    },
+}
 EMOJI_PATTERN = re.compile(
     "["
     "\U0001f1e6-\U0001f1ff"
@@ -291,7 +402,7 @@ def format_latex_for_text_widget(text: str) -> str:
 
     def display_formula(match: re.Match[str]) -> str:
         formula = match.group(1).strip()
-        return f"\n[公式]\n{formula}\n"
+        return f"\n[Formula]\n{formula}\n"
 
     def inline_formula(match: re.Match[str]) -> str:
         formula = match.group(1).strip()
@@ -356,7 +467,7 @@ def format_paragraphs_for_reading(text: str, indent: bool = True) -> str:
                 re.match(r">\s?", stripped),
                 re.match(r"\|.*\|$", stripped),
                 re.match(r":?-{3,}:?(\s*\|\s*:?-{3,}:?)+$", stripped),
-                stripped.startswith("[公式]"),
+                stripped.startswith("[Formula]"),
             )
         )
 
@@ -420,7 +531,13 @@ class DeepSeekChatApp:
         self.result_queue: "queue.Queue[tuple[str, int, str, float, str, str, int]]" = queue.Queue()
         self.is_waiting = False
         self.dark_mode = str(self.app_config.get("theme") or "light") == "dark"
+        self.language = self._normalize_language(str(self.app_config.get("language") or "en"))
         self.sidebar_visible = True
+        self.sidebar_width = self._normalize_sidebar_width(
+            self.app_config.get("sidebar_width")
+        )
+        self.sidebar_drag_start_x = 0
+        self.sidebar_drag_start_width = self.sidebar_width
         self.transcript: List[str] = []
         self.display_entries: List[tuple[str, str, str]] = []
         self.sessions: List[Dict[str, Any]] = self._load_sessions_from_disk()
@@ -429,6 +546,7 @@ class DeepSeekChatApp:
         self.summarized_message_count = 0
         self.link_count = 0
         self.history_rows: List[tuple[tk.Frame, tk.Button, tk.Button]] = []
+        self.api_settings_window: Optional[tk.Toplevel] = None
         self.style = ttk.Style()
 
         self._build_ui()
@@ -440,7 +558,7 @@ class DeepSeekChatApp:
         except Exception as exc:
             messagebox.showerror(
                 "DeepSeek API Key Missing",
-                f"Please fill {CONFIG_PATH.name} next to this program, or set DEEPSEEK_API_KEY.\n\n"
+                f"{self._text('api_key_missing_body')}\n\n"
                 f"Details: {exc}",
             )
 
@@ -450,25 +568,38 @@ class DeepSeekChatApp:
 
         self.main_frame = tk.Frame(self.root, bd=0, highlightthickness=0)
         self.main_frame.grid(row=0, column=0, sticky="nsew")
-        self.main_frame.columnconfigure(1, weight=1)
+        self.main_frame.columnconfigure(2, weight=1)
         self.main_frame.rowconfigure(0, weight=1)
 
-        self.sidebar = tk.Frame(self.main_frame, width=218, bd=0, highlightthickness=0)
+        self.sidebar = tk.Frame(
+            self.main_frame,
+            width=self.sidebar_width,
+            bd=0,
+            highlightthickness=0,
+        )
         self.sidebar.grid(row=0, column=0, sticky="ns")
         self.sidebar.grid_propagate(False)
         self.sidebar.columnconfigure(0, weight=1)
 
         self.sidebar_header = tk.Frame(self.sidebar, bd=0, highlightthickness=0)
-        self.sidebar_header.grid(row=0, column=0, sticky="ew", padx=10, pady=(12, 8))
+        self.sidebar_header.grid(row=0, column=0, sticky="ew", padx=14, pady=(16, 12))
         self.sidebar_header.columnconfigure(0, weight=1)
 
         self.brand_label = tk.Label(
             self.sidebar_header,
-            text="deepseek",
+            text="EasyChat",
             anchor="w",
-            font=("Segoe UI", 17, "bold"),
+            font=("Segoe UI", 18, "bold"),
         )
-        self.brand_label.grid(row=0, column=0, sticky="ew", padx=(6, 4))
+        self.brand_label.grid(row=0, column=0, sticky="ew", padx=(2, 4))
+
+        self.brand_subtitle = tk.Label(
+            self.sidebar_header,
+            text="DeepSeek V4",
+            anchor="w",
+            font=("Segoe UI", 9),
+        )
+        self.brand_subtitle.grid(row=1, column=0, sticky="ew", padx=(2, 4), pady=(1, 0))
 
         self.sidebar_close_button = tk.Button(
             self.sidebar_header,
@@ -478,71 +609,75 @@ class DeepSeekChatApp:
             bd=0,
             command=self.toggle_sidebar,
         )
-        self.sidebar_close_button.grid(row=0, column=1, sticky="e")
+        self.sidebar_close_button.grid(row=0, column=1, rowspan=2, sticky="ne")
 
         self.new_chat_button = tk.Button(
             self.sidebar,
-            text="➕  新对话",
+            text=f"+  {self._text('new_chat')}",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.new_chat,
         )
-        self.new_chat_button.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 12), ipady=9)
+        self.new_chat_button.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 14), ipady=10)
+
+        self.model_panel = tk.Frame(self.sidebar, bd=0, highlightthickness=1)
+        self.model_panel.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
+        self.model_panel.columnconfigure(0, weight=1)
 
         self.model_title = tk.Label(
-            self.sidebar,
-            text="当前模型",
+            self.model_panel,
+            text=self._text("current_model"),
             anchor="w",
             font=("Microsoft YaHei UI", 9),
         )
-        self.model_title.grid(row=2, column=0, sticky="ew", padx=16, pady=(4, 2))
+        self.model_title.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 2))
 
         self.model_label = tk.Label(
-            self.sidebar,
+            self.model_panel,
             text=self.model_name,
             anchor="w",
             font=("Segoe UI", 10, "bold"),
         )
-        self.model_label.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 8))
+        self.model_label.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
 
         self.pro_button = tk.Button(
-            self.sidebar,
+            self.model_panel,
             text="V4 Pro",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=lambda: self.set_model(DeepSeekClient.DEFAULT_MODEL),
         )
-        self.pro_button.grid(row=4, column=0, sticky="ew", padx=10, pady=(2, 6), ipady=8)
+        self.pro_button.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 6), ipady=8)
 
         self.flash_button = tk.Button(
-            self.sidebar,
+            self.model_panel,
             text="V4 Flash",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=lambda: self.set_model(DeepSeekClient.FLASH_MODEL),
         )
-        self.flash_button.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 14), ipady=8)
+        self.flash_button.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 6), ipady=8)
 
         self.thinking_button = tk.Button(
-            self.sidebar,
-            text="🧠  思考：关闭",
+            self.model_panel,
+            text=f"Thinking: {self._thinking_mode_label()}",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.toggle_thinking_mode,
         )
-        self.thinking_button.grid(row=6, column=0, sticky="ew", padx=10, pady=(0, 14), ipady=8)
+        self.thinking_button.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8), ipady=8)
 
         self.history_title = tk.Label(
             self.sidebar,
-            text="对话记录",
+            text=self._text("history"),
             anchor="w",
             font=("Microsoft YaHei UI", 9),
         )
-        self.history_title.grid(row=7, column=0, sticky="ew", padx=16, pady=(4, 6))
+        self.history_title.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 6))
 
         self.history_frame = tk.Frame(
             self.sidebar,
@@ -550,60 +685,76 @@ class DeepSeekChatApp:
             highlightthickness=0,
             relief=tk.FLAT,
         )
-        self.history_frame.grid(row=8, column=0, sticky="nsew", padx=10, pady=(0, 12))
+        self.history_frame.grid(row=4, column=0, sticky="nsew", padx=14, pady=(0, 12))
         self.history_frame.columnconfigure(0, weight=1)
 
         self.sidebar_spacer = tk.Frame(self.sidebar, bd=0, highlightthickness=0)
-        self.sidebar_spacer.grid(row=9, column=0, sticky="nsew")
-        self.sidebar.rowconfigure(8, weight=1)
+        self.sidebar_spacer.grid(row=5, column=0, sticky="nsew")
+        self.sidebar.rowconfigure(4, weight=1)
+
+        self.sidebar_actions = tk.Frame(self.sidebar, bd=0, highlightthickness=1)
+        self.sidebar_actions.grid(row=6, column=0, sticky="ew", padx=14, pady=(0, 16))
+        self.sidebar_actions.columnconfigure(0, weight=1)
 
         self.theme_button = tk.Button(
-            self.sidebar,
-            text="🌗  主题",
+            self.sidebar_actions,
+            text=self._text("theme_dark"),
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.toggle_theme,
         )
-        self.theme_button.grid(row=10, column=0, sticky="ew", padx=10, pady=(0, 8), ipady=8)
+        self.theme_button.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6), ipady=8)
 
         self.regenerate_button = tk.Button(
-            self.sidebar,
-            text="🔄  重新生成",
+            self.sidebar_actions,
+            text=f"R  {self._text('regenerate')}",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.regenerate_last,
         )
-        self.regenerate_button.grid(row=11, column=0, sticky="ew", padx=10, pady=(0, 6), ipady=8)
+        self.regenerate_button.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6), ipady=8)
 
         self.save_button = tk.Button(
-            self.sidebar,
-            text="💾  保存 .txt",
+            self.sidebar_actions,
+            text=f"S  {self._text('save_txt')}",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.save_transcript,
         )
-        self.save_button.grid(row=12, column=0, sticky="ew", padx=10, pady=(0, 6), ipady=8)
+        self.save_button.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 6), ipady=8)
 
         self.clear_button = tk.Button(
-            self.sidebar,
-            text="🧹  清屏",
+            self.sidebar_actions,
+            text=f"C  {self._text('clear')}",
             relief=tk.FLAT,
             bd=0,
             anchor="w",
             command=self.clear_chat,
         )
-        self.clear_button.grid(row=13, column=0, sticky="ew", padx=10, pady=(0, 18), ipady=8)
+        self.clear_button.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8), ipady=8)
+
+        self.sidebar_resize_handle = tk.Frame(
+            self.main_frame,
+            width=5,
+            bd=0,
+            highlightthickness=0,
+            cursor="sb_h_double_arrow",
+        )
+        self.sidebar_resize_handle.grid(row=0, column=1, sticky="ns")
+        self.sidebar_resize_handle.bind("<ButtonPress-1>", self._start_sidebar_resize)
+        self.sidebar_resize_handle.bind("<B1-Motion>", self._drag_sidebar_resize)
+        self.sidebar_resize_handle.bind("<ButtonRelease-1>", self._finish_sidebar_resize)
 
         self.content_frame = tk.Frame(self.main_frame, bd=0, highlightthickness=0)
-        self.content_frame.grid(row=0, column=1, sticky="nsew")
+        self.content_frame.grid(row=0, column=2, sticky="nsew")
         self.content_frame.columnconfigure(0, weight=1)
         self.content_frame.rowconfigure(1, weight=1)
 
-        self.topbar = tk.Frame(self.content_frame, bd=0, highlightthickness=0)
-        self.topbar.grid(row=0, column=0, sticky="ew", padx=28, pady=(18, 8))
+        self.topbar = tk.Frame(self.content_frame, bd=0, highlightthickness=1)
+        self.topbar.grid(row=0, column=0, sticky="ew", padx=24, pady=(18, 12))
         self.topbar.columnconfigure(1, weight=1)
 
         self.sidebar_open_button = tk.Button(
@@ -614,7 +765,7 @@ class DeepSeekChatApp:
             bd=0,
             command=self.toggle_sidebar,
         )
-        self.sidebar_open_button.grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.sidebar_open_button.grid(row=0, column=0, sticky="w", padx=(10, 10), pady=8)
 
         self.title_label = tk.Label(
             self.topbar,
@@ -622,7 +773,7 @@ class DeepSeekChatApp:
             anchor="w",
             font=("Segoe UI", 14, "bold"),
         )
-        self.title_label.grid(row=0, column=1, sticky="w")
+        self.title_label.grid(row=0, column=1, sticky="w", pady=8)
 
         self.model_badge = tk.Label(
             self.topbar,
@@ -631,19 +782,54 @@ class DeepSeekChatApp:
             padx=10,
             pady=4,
         )
-        self.model_badge.grid(row=0, column=2, sticky="e")
+        self.model_badge.grid(row=0, column=2, sticky="e", pady=8)
+
+        self.language_label = tk.Label(
+            self.topbar,
+            text=self._text("language"),
+            anchor="e",
+            font=("Segoe UI", 9),
+        )
+        self.language_label.grid(row=0, column=3, sticky="e", padx=(14, 6), pady=8)
+
+        self.language_var = tk.StringVar(value=self._language_display_name(self.language))
+        self.language_menu = tk.OptionMenu(
+            self.topbar,
+            self.language_var,
+            "English",
+            "Chinese",
+            command=lambda _value: self.set_language_from_menu(),
+        )
+        self.language_menu.configure(relief=tk.FLAT, bd=0, highlightthickness=0)
+        self.language_menu.grid(row=0, column=4, sticky="e", padx=(0, 8), pady=8)
+
+        self.api_settings_button = tk.Button(
+            self.topbar,
+            text=self._text("api_settings"),
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=4,
+            command=self.open_api_settings,
+        )
+        self.api_settings_button.grid(row=0, column=5, sticky="e", padx=(0, 10), pady=8)
+
+        self.chat_panel = tk.Frame(self.content_frame, bd=0, highlightthickness=1)
+        self.chat_panel.grid(row=1, column=0, sticky="nsew", padx=24, pady=(0, 10))
+        self.chat_panel.columnconfigure(0, weight=1)
+        self.chat_panel.rowconfigure(0, weight=1)
 
         self.chat_area = scrolledtext.ScrolledText(
-            self.content_frame,
+            self.chat_panel,
             wrap=tk.WORD,
             state=tk.DISABLED,
             font=CHAT_BODY_FONT,
             bd=0,
             relief=tk.FLAT,
-            padx=26,
-            pady=18,
+            padx=28,
+            pady=20,
         )
-        self.chat_area.grid(row=1, column=0, sticky="nsew", padx=28, pady=(0, 8))
+        self.chat_area.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
         self.chat_area.tag_configure(
             "user",
             justify=tk.RIGHT,
@@ -705,10 +891,10 @@ class DeepSeekChatApp:
             anchor="w",
             font=("Segoe UI", 9),
         )
-        self.status_label.grid(row=2, column=0, sticky="ew", padx=34, pady=(0, 6))
+        self.status_label.grid(row=2, column=0, sticky="ew", padx=32, pady=(0, 8))
 
         self.composer_frame = tk.Frame(self.content_frame, bd=0, highlightthickness=1)
-        self.composer_frame.grid(row=3, column=0, sticky="ew", padx=28, pady=(0, 22))
+        self.composer_frame.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 24))
         self.composer_frame.columnconfigure(0, weight=1)
         self.input_box = tk.Text(
             self.composer_frame,
@@ -741,7 +927,7 @@ class DeepSeekChatApp:
 
         self._append_chat(
             "System",
-            "在下方输入问题。Enter 发送，Shift+Enter 换行。",
+            self._text("initial_hint"),
         )
         self._refresh_model_display()
         self.apply_theme()
@@ -873,8 +1059,8 @@ class DeepSeekChatApp:
                 self._insert_with_tags(line[position : match.start()], base_tag, *extra_tags)
 
             if match.group(1) is not None:
-                label = match.group(1).strip() or "图片"
-                self._insert_link(f"图片: {label}", match.group(2), base_tag, *extra_tags)
+                label = match.group(1).strip() or self._text("image")
+                self._insert_link(f"{self._text('image')}: {label}", match.group(2), base_tag, *extra_tags)
             elif match.group(3) is not None:
                 self._insert_link(match.group(3), match.group(4), base_tag, *extra_tags)
             elif match.group(5) is not None:
@@ -996,6 +1182,61 @@ class DeepSeekChatApp:
         button.bind("<Enter>", on_enter)
         button.bind("<Leave>", on_leave)
 
+    def _normalize_language(self, language: str) -> str:
+        return language if language in UI_TEXT else "en"
+
+    def _text(self, key: str) -> str:
+        language = self._normalize_language(getattr(self, "language", "en"))
+        return UI_TEXT.get(language, UI_TEXT["en"]).get(key, UI_TEXT["en"].get(key, key))
+
+    def _language_display_name(self, language: str) -> str:
+        return "Chinese" if self._normalize_language(language) == "zh" else "English"
+
+    def _normalize_sidebar_width(self, value: Any) -> int:
+        try:
+            width = int(value)
+        except (TypeError, ValueError):
+            width = 218
+        return max(168, min(width, 360))
+
+    def set_language_from_menu(self) -> None:
+        selected = self.language_var.get()
+        self.language = "zh" if selected == "Chinese" else "en"
+        self.app_config["language"] = self.language
+        save_config(self.app_config)
+        self._refresh_language_text()
+        self.status_label.configure(text=f"Language changed to {selected}")
+
+    def _refresh_language_text(self) -> None:
+        self.new_chat_button.configure(text=f"+  {self._text('new_chat')}")
+        self.model_title.configure(text=self._text("current_model"))
+        self.history_title.configure(text=self._text("history"))
+        self.regenerate_button.configure(text=f"R  {self._text('regenerate')}")
+        self.save_button.configure(text=f"S  {self._text('save_txt')}")
+        self.clear_button.configure(text=f"C  {self._text('clear')}")
+        self.api_settings_button.configure(text=self._text("api_settings"))
+        self.language_label.configure(text=self._text("language"))
+        self.language_var.set(self._language_display_name(self.language))
+        self._refresh_model_display()
+
+    def _set_sidebar_width(self, width: int) -> None:
+        self.sidebar_width = self._normalize_sidebar_width(width)
+        self.sidebar.configure(width=self.sidebar_width)
+        if self.sidebar_visible:
+            self.main_frame.columnconfigure(0, minsize=self.sidebar_width)
+
+    def _start_sidebar_resize(self, event: tk.Event) -> None:
+        self.sidebar_drag_start_x = int(event.x_root)
+        self.sidebar_drag_start_width = self.sidebar_width
+
+    def _drag_sidebar_resize(self, event: tk.Event) -> None:
+        delta = int(event.x_root) - self.sidebar_drag_start_x
+        self._set_sidebar_width(self.sidebar_drag_start_width + delta)
+
+    def _finish_sidebar_resize(self, _event: tk.Event) -> None:
+        self.app_config["sidebar_width"] = self.sidebar_width
+        save_config(self.app_config)
+
     def _has_real_chat(self) -> bool:
         return any(message.get("role") != "system" for message in self.messages)
 
@@ -1004,7 +1245,7 @@ class DeepSeekChatApp:
             if message.get("role") == "user":
                 title = str(message.get("content", "")).strip().replace("\n", " ")
                 return title[:22] + ("..." if len(title) > 22 else "")
-        return f"新对话 {len(self.sessions) + 1}"
+        return f"{self._text('new_session_title')} {len(self.sessions) + 1}"
 
     def _save_current_session(self) -> None:
         if not self._has_real_chat():
@@ -1063,7 +1304,7 @@ class DeepSeekChatApp:
     def _thinking_mode_label(self) -> str:
         mode = self._current_thinking_mode()
         labels = {
-            "disabled": "关闭",
+            "disabled": self._text("thinking_off"),
             "high": "High",
             "max": "Max",
         }
@@ -1089,7 +1330,7 @@ class DeepSeekChatApp:
     def _write_sessions_to_disk(self) -> None:
         ensure_runtime_files()
         SESSIONS_PATH.write_text(
-            json.dumps(self.sessions, ensure_ascii=False, indent=2),
+            json.dumps(self.sessions, ensure_ascii=True, indent=2),
             encoding="utf-8",
         )
 
@@ -1105,7 +1346,7 @@ class DeepSeekChatApp:
             marker = "● " if index == self.active_session_index else ""
             title_button = tk.Button(
                 row,
-                text=f"{marker}{session.get('title', '未命名对话')}",
+                text=f"{marker}{session.get('title', self._text('untitled_chat'))}",
                 relief=tk.FLAT,
                 bd=0,
                 anchor="w",
@@ -1139,7 +1380,7 @@ class DeepSeekChatApp:
         self.summarized_message_count = 0
         self.conversation_count = 0
         self.status_label.configure(text="Ready")
-        self._append_chat("System", "新对话已开始。Enter 发送，Shift+Enter 换行。", "system")
+        self._append_chat("System", self._text("new_chat_started"), "system")
         self._refresh_history_list()
         self._render_current_chat()
 
@@ -1176,34 +1417,36 @@ class DeepSeekChatApp:
 
     def apply_theme(self) -> None:
         if self.dark_mode:
-            page_bg = "#202124"
-            sidebar_bg = "#16181c"
-            chat_bg = "#24262a"
-            input_bg = "#30343a"
-            fg = "#ececec"
-            muted = "#b4b4b4"
-            border = "#41464d"
-            button_bg = "#202328"
-            button_hover = "#343941"
-            selected_bg = "#303640"
-            accent_bg = "#ececec"
-            accent_hover = "#ffffff"
-            send_fg = "#111111"
-            accent_fg = "#ffffff"
+            page_bg = "#171a1f"
+            sidebar_bg = "#111418"
+            panel_bg = "#1f242b"
+            chat_bg = "#1b2026"
+            input_bg = "#222831"
+            fg = "#f2f3ef"
+            muted = "#a8b0b6"
+            border = "#343c46"
+            button_bg = "#20262e"
+            button_hover = "#2b343f"
+            selected_bg = "#29453f"
+            accent_bg = "#3dd6b3"
+            accent_hover = "#66e4c9"
+            send_fg = "#061613"
+            accent_fg = "#071613"
             insert = "#ffffff"
         else:
-            page_bg = "#f4f6f8"
-            sidebar_bg = "#e8edf3"
-            chat_bg = "#ffffff"
-            input_bg = "#eef2f6"
-            fg = "#111111"
-            muted = "#676767"
-            border = "#cfd7e2"
-            button_bg = "#eef2f6"
-            button_hover = "#dfe7f0"
-            selected_bg = "#d8e1ec"
-            accent_bg = "#111111"
-            accent_hover = "#2d3748"
+            page_bg = "#f5f6f2"
+            sidebar_bg = "#e8ece5"
+            panel_bg = "#fbfcf8"
+            chat_bg = "#fffefa"
+            input_bg = "#ffffff"
+            fg = "#1c211f"
+            muted = "#65706b"
+            border = "#cdd6ce"
+            button_bg = "#f2f5ef"
+            button_hover = "#e0e8df"
+            selected_bg = "#d6eee6"
+            accent_bg = "#0f8f75"
+            accent_hover = "#0a755f"
             send_fg = "#ffffff"
             accent_fg = "#ffffff"
             insert = "#111111"
@@ -1211,25 +1454,46 @@ class DeepSeekChatApp:
         self.root.configure(bg=page_bg)
         self.main_frame.configure(bg=page_bg)
         self.sidebar.configure(bg=sidebar_bg)
+        self.sidebar_resize_handle.configure(bg=border)
         self.sidebar_header.configure(bg=sidebar_bg)
         self.sidebar_spacer.configure(bg=sidebar_bg)
+        self.model_panel.configure(
+            bg=panel_bg,
+            highlightbackground=border,
+            highlightcolor=border,
+        )
+        self.sidebar_actions.configure(
+            bg=panel_bg,
+            highlightbackground=border,
+            highlightcolor=border,
+        )
         self.content_frame.configure(bg=page_bg)
-        self.topbar.configure(bg=page_bg)
+        self.topbar.configure(
+            bg=panel_bg,
+            highlightbackground=border,
+            highlightcolor=border,
+        )
+        self.chat_panel.configure(
+            bg=border,
+            highlightbackground=border,
+            highlightcolor=border,
+        )
         self.composer_frame.configure(bg=input_bg, highlightbackground=border, highlightcolor=border)
 
         self.brand_label.configure(bg=sidebar_bg, fg=fg)
+        self.brand_subtitle.configure(bg=sidebar_bg, fg=muted)
         self._configure_hover_button(self.sidebar_close_button, button_bg, button_hover, fg)
         self.sidebar_close_button.configure(
             highlightbackground=sidebar_bg,
             highlightcolor=fg,
         )
-        self._configure_hover_button(self.sidebar_open_button, page_bg, button_hover, fg)
+        self._configure_hover_button(self.sidebar_open_button, panel_bg, button_hover, fg)
         self.sidebar_open_button.configure(
-            highlightbackground=page_bg,
+            highlightbackground=panel_bg,
             highlightcolor=fg,
         )
-        self.model_title.configure(bg=sidebar_bg, fg=muted)
-        self.model_label.configure(bg=sidebar_bg, fg=fg)
+        self.model_title.configure(bg=panel_bg, fg=muted)
+        self.model_label.configure(bg=panel_bg, fg=fg)
         self.history_title.configure(bg=sidebar_bg, fg=muted)
         self.history_frame.configure(bg=sidebar_bg)
         for index, (row, title_button, delete_button) in enumerate(self.history_rows):
@@ -1257,8 +1521,22 @@ class DeepSeekChatApp:
                 highlightbackground=row_bg,
                 highlightcolor=fg,
             )
-        self.title_label.configure(bg=page_bg, fg=fg)
+        self.title_label.configure(bg=panel_bg, fg=fg)
         self.model_badge.configure(bg=selected_bg, fg=muted)
+        self.language_label.configure(bg=panel_bg, fg=muted)
+        self.language_menu.configure(
+            bg=button_bg,
+            fg=fg,
+            activebackground=button_hover,
+            activeforeground=fg,
+            highlightbackground=panel_bg,
+        )
+        self.language_menu["menu"].configure(bg=button_bg, fg=fg, activebackground=button_hover)
+        self._configure_hover_button(self.api_settings_button, button_bg, button_hover, fg)
+        self.api_settings_button.configure(
+            highlightbackground=panel_bg,
+            highlightcolor=fg,
+        )
         self.status_label.configure(bg=page_bg, fg=muted)
 
         self.style.configure("TFrame", background=page_bg)
@@ -1266,18 +1544,18 @@ class DeepSeekChatApp:
         self.style.configure("TButton", padding=4)
         self._configure_hover_button(self.theme_button, button_bg, button_hover, fg)
         self.theme_button.configure(
-            text="☀️  浅色" if self.dark_mode else "🌙  深色",
-            highlightbackground=sidebar_bg,
+            text=f"Light  {self._text('theme_light')}" if self.dark_mode else f"Dark  {self._text('theme_dark')}",
+            highlightbackground=panel_bg,
             highlightcolor=fg,
         )
-        self._configure_hover_button(self.new_chat_button, button_bg, button_hover, fg)
+        self._configure_hover_button(self.new_chat_button, accent_bg, accent_hover, accent_fg)
         self.new_chat_button.configure(
             highlightbackground=sidebar_bg,
-            highlightcolor=fg,
+            highlightcolor=accent_bg,
         )
         self._configure_hover_button(self.thinking_button, button_bg, button_hover, fg)
         self.thinking_button.configure(
-            highlightbackground=sidebar_bg,
+            highlightbackground=panel_bg,
             highlightcolor=fg,
         )
         for button in (self.pro_button, self.flash_button):
@@ -1296,7 +1574,7 @@ class DeepSeekChatApp:
             )
             button.configure(
                 disabledforeground="#777777",
-                highlightbackground=sidebar_bg,
+                highlightbackground=panel_bg,
                 highlightcolor=fg,
             )
         for button in (
@@ -1307,7 +1585,7 @@ class DeepSeekChatApp:
             self._configure_hover_button(button, button_bg, button_hover, fg)
             button.configure(
                 disabledforeground="#777777",
-                highlightbackground=sidebar_bg,
+                highlightbackground=panel_bg,
                 highlightcolor=fg,
             )
         self._configure_hover_button(
@@ -1361,17 +1639,23 @@ class DeepSeekChatApp:
         if self.sidebar_visible:
             if not self.sidebar.winfo_ismapped():
                 self.sidebar.grid(row=0, column=0, sticky="ns")
+            if not self.sidebar_resize_handle.winfo_ismapped():
+                self.sidebar_resize_handle.grid(row=0, column=1, sticky="ns")
             self.sidebar_open_button.grid_remove()
-            self.main_frame.columnconfigure(0, minsize=218)
+            self.sidebar.configure(width=self.sidebar_width)
+            self.main_frame.columnconfigure(0, minsize=self.sidebar_width)
         else:
             self.sidebar.grid_remove()
+            self.sidebar_resize_handle.grid_remove()
             self.sidebar_open_button.grid()
             self.main_frame.columnconfigure(0, minsize=0)
 
     def _refresh_model_display(self) -> None:
         self.model_label.configure(text=self.model_name)
         self.model_badge.configure(text=self.model_name)
-        self.thinking_button.configure(text=f"🧠  思考：{self._thinking_mode_label()}")
+        self.thinking_button.configure(
+            text=f"{self._text('thinking')}: {self._thinking_mode_label()}"
+        )
         self.pro_button.configure(
             state=tk.DISABLED if self.model_name == DeepSeekClient.DEFAULT_MODEL else tk.NORMAL
         )
@@ -1383,14 +1667,187 @@ class DeepSeekChatApp:
             self.flash_button.configure(state=tk.DISABLED)
             self.new_chat_button.configure(state=tk.DISABLED)
             self.thinking_button.configure(state=tk.DISABLED)
+            self.api_settings_button.configure(state=tk.DISABLED)
             self.regenerate_button.configure(state=tk.DISABLED)
             self.clear_button.configure(state=tk.DISABLED)
         else:
             self.new_chat_button.configure(state=tk.NORMAL)
             self.thinking_button.configure(state=tk.NORMAL)
+            self.api_settings_button.configure(state=tk.NORMAL)
             self.regenerate_button.configure(state=tk.NORMAL)
             self.clear_button.configure(state=tk.NORMAL)
         self.apply_theme()
+
+    def open_api_settings(self) -> None:
+        if self.is_waiting:
+            messagebox.showinfo(self._text("please_wait"), self._text("api_busy"))
+            return
+
+        if self.api_settings_window is not None and self.api_settings_window.winfo_exists():
+            self.api_settings_window.lift()
+            self.api_settings_window.focus_force()
+            return
+
+        window = tk.Toplevel(self.root)
+        self.api_settings_window = window
+        window.title(self._text("api_settings"))
+        window.resizable(False, False)
+        window.transient(self.root)
+
+        page_bg = "#202124" if self.dark_mode else "#f4f6f8"
+        panel_bg = "#30343a" if self.dark_mode else "#ffffff"
+        fg = "#ececec" if self.dark_mode else "#111111"
+        muted = "#b4b4b4" if self.dark_mode else "#676767"
+        border = "#41464d" if self.dark_mode else "#cfd7e2"
+        button_bg = "#202328" if self.dark_mode else "#eef2f6"
+        button_hover = "#343941" if self.dark_mode else "#dfe7f0"
+        accent_bg = "#ececec" if self.dark_mode else "#111111"
+        accent_hover = "#ffffff" if self.dark_mode else "#2d3748"
+        accent_fg = "#111111" if self.dark_mode else "#ffffff"
+
+        window.configure(bg=page_bg)
+        form = tk.Frame(window, bg=panel_bg, bd=0, highlightthickness=1, highlightbackground=border)
+        form.grid(row=0, column=0, sticky="nsew", padx=14, pady=14)
+        form.columnconfigure(1, weight=1)
+
+        title = tk.Label(
+            form,
+            text=self._text("api_settings"),
+            bg=panel_bg,
+            fg=fg,
+            anchor="w",
+            font=("Microsoft YaHei UI", 12, "bold"),
+        )
+        title.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(12, 10))
+
+        key_label = tk.Label(form, text="API Key", bg=panel_bg, fg=muted, anchor="w")
+        key_label.grid(row=1, column=0, sticky="w", padx=(14, 10), pady=(0, 8))
+        api_key_var = tk.StringVar(value=str(self.app_config.get("DEEPSEEK_API_KEY") or ""))
+        api_key_entry = tk.Entry(
+            form,
+            textvariable=api_key_var,
+            width=42,
+            show="*",
+            bg=page_bg,
+            fg=fg,
+            insertbackground=fg,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=border,
+            highlightcolor=border,
+        )
+        api_key_entry.grid(row=1, column=1, sticky="ew", padx=(0, 14), pady=(0, 8), ipady=5)
+
+        base_label = tk.Label(form, text="Base URL", bg=panel_bg, fg=muted, anchor="w")
+        base_label.grid(row=2, column=0, sticky="w", padx=(14, 10), pady=(0, 8))
+        base_url_var = tk.StringVar(
+            value=str(self.app_config.get("DEEPSEEK_BASE_URL") or DeepSeekClient.DEFAULT_BASE_URL)
+        )
+        base_url_entry = tk.Entry(
+            form,
+            textvariable=base_url_var,
+            width=42,
+            bg=page_bg,
+            fg=fg,
+            insertbackground=fg,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=border,
+            highlightcolor=border,
+        )
+        base_url_entry.grid(row=2, column=1, sticky="ew", padx=(0, 14), pady=(0, 8), ipady=5)
+
+        reveal_var = tk.BooleanVar(value=False)
+
+        def toggle_reveal() -> None:
+            api_key_entry.configure(show="" if reveal_var.get() else "*")
+
+        reveal_check = tk.Checkbutton(
+            form,
+            text=self._text("show_api_key"),
+            variable=reveal_var,
+            command=toggle_reveal,
+            bg=panel_bg,
+            fg=muted,
+            activebackground=panel_bg,
+            activeforeground=fg,
+            selectcolor=panel_bg,
+        )
+        reveal_check.grid(row=3, column=1, sticky="w", padx=(0, 14), pady=(0, 12))
+
+        actions = tk.Frame(form, bg=panel_bg, bd=0, highlightthickness=0)
+        actions.grid(row=4, column=0, columnspan=2, sticky="e", padx=14, pady=(0, 14))
+
+        def close_window() -> None:
+            self.api_settings_window = None
+            window.destroy()
+
+        def save_api_settings() -> None:
+            api_key = api_key_var.get().strip()
+            base_url = base_url_var.get().strip() or DeepSeekClient.DEFAULT_BASE_URL
+            if not api_key:
+                self.client = None
+                self.status_label.configure(text="API key required")
+                messagebox.showerror(
+                    self._text("api_key_missing_title"),
+                    self._text("api_required"),
+                    parent=window,
+                )
+                return
+            self.app_config["DEEPSEEK_API_KEY"] = api_key
+            self.app_config["DEEPSEEK_BASE_URL"] = base_url
+            save_config(self.app_config)
+
+            try:
+                self.client = DeepSeekClient(api_key=api_key or None, base_url=base_url)
+            except Exception as exc:
+                self.client = None
+                self.status_label.configure(text="API settings saved, but DeepSeek is not ready")
+                messagebox.showerror(
+                    self._text("api_saved_title"),
+                    f"{self._text('api_saved_error')}\n\n{exc}",
+                    parent=window,
+                )
+                return
+
+            self.status_label.configure(text="API settings saved")
+            messagebox.showinfo(
+                self._text("api_settings"),
+                self._text("api_saved_ok"),
+                parent=window,
+            )
+            close_window()
+
+        cancel_button = tk.Button(
+            actions,
+            text=self._text("cancel"),
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+            pady=6,
+            command=close_window,
+        )
+        cancel_button.grid(row=0, column=0, padx=(0, 8))
+        self._configure_hover_button(cancel_button, button_bg, button_hover, fg)
+
+        save_button = tk.Button(
+            actions,
+            text=self._text("save"),
+            relief=tk.FLAT,
+            bd=0,
+            padx=16,
+            pady=6,
+            command=save_api_settings,
+        )
+        save_button.grid(row=0, column=1)
+        self._configure_hover_button(save_button, accent_bg, accent_hover, accent_fg, accent_fg)
+
+        window.protocol("WM_DELETE_WINDOW", close_window)
+        window.update_idletasks()
+        x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - window.winfo_width()) // 2)
+        y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - window.winfo_height()) // 3)
+        window.geometry(f"+{x}+{y}")
+        api_key_entry.focus_set()
 
     def set_model(self, model_name: str) -> None:
         if self.is_waiting:
@@ -1481,7 +1938,10 @@ class DeepSeekChatApp:
             return
 
         if len(self.messages) < 2:
-            messagebox.showinfo("无法重新生成", "还没有可以重新生成的对话。")
+            messagebox.showinfo(
+                self._text("cannot_regenerate"),
+                self._text("no_regenerate_chat"),
+            )
             return
 
         if self.messages[-1]["role"] == "assistant":
@@ -1492,7 +1952,7 @@ class DeepSeekChatApp:
             )
 
         if self.messages[-1]["role"] != "user":
-            messagebox.showinfo("无法重新生成", "请先发送一个问题。")
+            messagebox.showinfo(self._text("cannot_regenerate"), self._text("send_first"))
             return
 
         self.conversation_count += 1
@@ -1500,7 +1960,7 @@ class DeepSeekChatApp:
         model_name = self.model_name
         self._append_chat(
             f"Conversation {turn_number} - Regenerate",
-            "重新生成上一条回复。",
+            self._text("regenerate_notice"),
             "system",
         )
         self._start_request(
@@ -1514,12 +1974,12 @@ class DeepSeekChatApp:
 
     def save_transcript(self) -> None:
         if not self.transcript:
-            messagebox.showinfo("无需保存", "当前会话没有内容。")
+            messagebox.showinfo(self._text("nothing_to_save"), self._text("empty_session"))
             return
 
         path = filedialog.asksaveasfilename(
             parent=self.root,
-            title="保存当前会话",
+            title=self._text("save_current_session"),
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
         )
@@ -1538,10 +1998,10 @@ class DeepSeekChatApp:
         if target_index < 0 or target_index >= len(self.sessions):
             return
 
-        title = str(self.sessions[target_index].get("title") or "这条对话")
+        title = str(self.sessions[target_index].get("title") or self._text("this_conversation"))
         confirmed = messagebox.askyesno(
-            "删除历史记录",
-            f"确定删除「{title}」吗？\n\n此操作不可恢复。",
+            self._text("delete_history"),
+            self._text("delete_confirm").format(title=title),
             parent=self.root,
         )
         if not confirmed:
@@ -1561,7 +2021,7 @@ class DeepSeekChatApp:
             self.chat_area.configure(state=tk.NORMAL)
             self.chat_area.delete("1.0", tk.END)
             self.chat_area.configure(state=tk.DISABLED)
-            self._append_chat("System", "历史记录已删除。Enter 发送，Shift+Enter 换行。", "system")
+            self._append_chat("System", self._text("history_deleted"), "system")
             self.status_label.configure(text="Deleted selected conversation")
         elif self.active_session_index is not None and target_index < self.active_session_index:
             self.active_session_index -= 1
@@ -1575,7 +2035,7 @@ class DeepSeekChatApp:
 
     def delete_selected_session(self) -> None:
         if self.active_session_index is None:
-            messagebox.showinfo("无法删除", "请先在左侧选择一条历史记录。")
+            messagebox.showinfo(self._text("cannot_delete"), self._text("select_history"))
             return
         self.delete_session_by_index(self.active_session_index)
 
@@ -1592,7 +2052,7 @@ class DeepSeekChatApp:
         self.chat_area.delete("1.0", tk.END)
         self.chat_area.configure(state=tk.DISABLED)
         self.status_label.configure(text="Ready")
-        self._append_chat("System", "已清屏。Enter 发送，Shift+Enter 换行。", "system")
+        self._append_chat("System", self._text("cleared"), "system")
 
     def _format_messages_for_summary(self, messages: List[Message]) -> str:
         parts: List[str] = []
@@ -1610,12 +2070,11 @@ class DeepSeekChatApp:
         messages_to_summarize: List[Message],
     ) -> str:
         assert self.client is not None
-        old_summary = existing_summary.strip() or "无。"
+        old_summary = existing_summary.strip() or self._text("summary_none")
         new_context = self._format_messages_for_summary(messages_to_summarize)
-        prompt = (
-            f"已有摘要：\n{old_summary}\n\n"
-            f"需要并入摘要的旧对话：\n{new_context}\n\n"
-            "请输出更新后的摘要。"
+        prompt = self._text("summary_prompt").format(
+            old_summary=old_summary,
+            new_context=new_context,
         )
         response = self.client.chat(
             messages=[
@@ -1655,11 +2114,7 @@ class DeepSeekChatApp:
             context_messages.append(
                 {
                     "role": "system",
-                    "content": (
-                        "此前较早对话的压缩摘要如下。回答时请把它作为长期上下文参考，"
-                        "同时优先遵循最近原文消息：\n"
-                        f"{summary.strip()}"
-                    ),
+                    "content": self._text("summary_context").format(summary=summary.strip()),
                 }
             )
         context_messages.extend(dict(message) for message in conversation_messages[summarized_count:])
@@ -1754,8 +2209,10 @@ class DeepSeekChatApp:
 
 
 def launch_gui() -> None:
+    configure_windows_dpi_awareness()
     ensure_runtime_files()
     root = tk.Tk()
+    configure_tk_scaling(root)
     app = DeepSeekChatApp(root)
 
     def on_close() -> None:
