@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EasyChat</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <section>
+          <h1>EasyChat</h1>
+          <p id="statusText">Ready</p>
+        </section>
+        <button id="settingsButton" class="icon-button" type="button" title="Settings">Settings</button>
+      </header>
+
+      <section id="settingsPanel" class="settings-panel" hidden>
+        <label>
+          <span data-i18n="apiKey">API Key</span>
+          <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false">
+        </label>
+        <label>
+          <span data-i18n="baseUrl">Base URL</span>
+          <input id="baseUrlInput" type="url" spellcheck="false">
+        </label>
+        <div class="settings-grid">
+          <label>
+            <span data-i18n="model">Model</span>
+            <select id="modelSelect">
+              <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+              <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="thinking">Thinking</span>
+            <select id="thinkingSelect">
+              <option value="disabled">Off</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="theme">Theme</span>
+            <select id="themeSelect">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="language">Language</span>
+            <select id="languageSelect">
+              <option value="en">English</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </label>
+        </div>
+        <button id="saveSettingsButton" class="primary-button" type="button" data-i18n="saveSettings">
+          Save Settings
+        </button>
+      </section>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <footer class="composer">
+        <textarea id="promptInput" rows="4" data-i18n-placeholder="placeholder"></textarea>
+        <div class="composer-actions">
+          <button id="newButton" type="button" data-i18n="newChat">New</button>
+          <button id="pageButton" type="button" data-i18n="usePage">Use Page</button>
+          <button id="regenerateButton" type="button" data-i18n="regenerate">Regenerate</button>
+          <button id="saveButton" type="button" data-i18n="save">Save</button>
+          <button id="clearButton" type="button" data-i18n="clear">Clear</button>
+          <button id="sendButton" class="send-button" type="button" data-i18n="send">Send</button>
+        </div>
+      </footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
