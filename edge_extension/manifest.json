@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "EasyChat DeepSeek Edge",
+  "description": "A compact DeepSeek chat companion for Microsoft Edge.",
+  "version": "0.1.0",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "EasyChat"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}

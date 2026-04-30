@@ -54,6 +54,9 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 - Sidebar action buttons use emoji-leading labels for a more consistent visual
   language.
 - Portable Windows build flow through `build_exe.ps1` and PyInstaller.
+- Microsoft Edge extension prototype under `edge_extension/` with a Manifest V3
+  popup chat UI, local settings storage, transcript download, and active-page
+  context capture including visible page text and common interactive elements.
 
 ## Important Files
 
@@ -152,8 +155,20 @@ dist/DeepSeekChat/DeepSeekChat.exe
 - Current repository state observed:
   - Main implementation is concentrated in `deepseek_api_client.py`.
   - `ds_v4.py` is only a compatibility entrypoint.
+  - `edge_extension/` contains the browser extension prototype for the `edge`
+    branch.
   - User secrets and generated runtime/build output are ignored by Git.
   - Packaging is documented and automated through `build_exe.ps1`.
+
+### 2026-04-30
+
+- Added an unpacked Microsoft Edge extension prototype in `edge_extension/`.
+- The extension provides a popup chat UI with DeepSeek API settings, model and
+  thinking controls, theme/language options, local message persistence,
+  transcript export, and current-page context capture.
+- Expanded the Edge extension `Use Page` action so it injects a script into the
+  active tab and captures visible page text plus common interactive elements,
+  not only the title, URL, and selected text.
 
 ## Agent Guidelines
 
