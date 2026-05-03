@@ -52,6 +52,11 @@ UI_TEXT = {
         "summary_prompt": "Existing summary:\n{old_summary}\n\nOlder messages to merge:\n{new_context}\n\nOutput the updated summary.",
         "summary_context": "A compressed summary of earlier messages follows. Use it as long-term context, while prioritizing the recent full messages:\n{summary}",
         "language": "Language",
+        "copy": "Copy",
+        "inspector": "Inspector",
+        "session_state": "Session State",
+        "session_turns": "Turns: {turns}\nMessages: {messages}",
+        "memory_state": "Summary memory: {count} messages\n{summary}",
     },
     "zh": {
         "new_chat": "\u65b0\u5bf9\u8bdd",
@@ -99,5 +104,10 @@ UI_TEXT = {
         "summary_prompt": "\u5df2\u6709\u6458\u8981\uff1a\n{old_summary}\n\n\u9700\u8981\u5e76\u5165\u6458\u8981\u7684\u65e7\u5bf9\u8bdd\uff1a\n{new_context}\n\n\u8bf7\u8f93\u51fa\u66f4\u65b0\u540e\u7684\u6458\u8981\u3002",
         "summary_context": "\u6b64\u524d\u8f83\u65e9\u5bf9\u8bdd\u7684\u538b\u7f29\u6458\u8981\u5982\u4e0b\u3002\u56de\u7b54\u65f6\u8bf7\u628a\u5b83\u4f5c\u4e3a\u957f\u671f\u4e0a\u4e0b\u6587\u53c2\u8003\uff0c\u540c\u65f6\u4f18\u5148\u9075\u5faa\u6700\u8fd1\u539f\u6587\u6d88\u606f\uff1a\n{summary}",
         "language": "\u8bed\u8a00",
+        "copy": "\u590d\u5236",
+        "inspector": "\u68c0\u89c6\u5668",
+        "session_state": "\u4f1a\u8bdd\u72b6\u6001",
+        "session_turns": "\u8f6e\u6b21\uff1a{turns}\n\u6d88\u606f\uff1a{messages}",
+        "memory_state": "\u6458\u8981\u8bb0\u5fc6\uff1a{count} \u6761\u6d88\u606f\n{summary}",
     },
 }

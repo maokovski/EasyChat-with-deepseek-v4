@@ -57,6 +57,15 @@ re-exports the compatibility surface from `deepseek_api_client.py`.
 - Portable Windows build flow through `build_exe.ps1` and PyInstaller.
 - A compact API settings subwindow is available from the top bar for editing
   the DeepSeek API key and base URL without manually opening `config.json`.
+- The desktop UI follows a workstation layout with a history-focused left
+  sidebar, top toolbar, central chat surface, bottom composer, and a toggleable
+  right Inspector column for model controls, thinking mode, session counts, and
+  summary-memory state.
+- Assistant replies stream into the chat UI incrementally through the
+  OpenAI-compatible DeepSeek streaming API, then re-render through the existing
+  Markdown display path once the response finishes.
+- Chat output includes explicit copy handling for selected text in rendered
+  regions such as fenced code, tables, formulas, and other styled spans.
 - The UI language can be switched at runtime between English and Chinese; source
   files keep Chinese UI strings as escaped Unicode so literal Chinese characters
   do not appear in project files.
@@ -202,6 +211,30 @@ dist/DeepSeekChat/DeepSeekChat.exe
   `deepseek_client.py`, and language text lives in `ui_text.py`.
 - Updated `WORKFLOW.md` with the new source layout and expanded Python compile
   verification command.
+
+### 2026-05-03
+
+- Reworked the desktop GUI toward the core LLM workstation skeleton: the left
+  sidebar now emphasizes new chat and conversation history, the central area
+  keeps the chat surface and composer, and a toggleable right Inspector column
+  hosts model selection, thinking mode, quick actions, current turn/message
+  counts, and summary-memory status.
+- Added English and Chinese UI text for the Inspector and session-state labels.
+- Changed model replies from one-shot UI insertion to visible streaming chunks
+  using the DeepSeek/OpenAI-compatible `stream=True` chat completion path, with
+  final Markdown re-rendering after completion.
+- Replaced the active LaTeX symbol mapping with Unicode-escape based symbols,
+  added common math operators such as `\oslash`, and added explicit chat text
+  copy support through Ctrl+C and a right-click copy menu.
+- Removed the visible `[Formula]` marker from rendered math blocks and added
+  balanced-brace handling for nested `\frac{...}{...}` formulas such as
+  denominators containing superscripts.
+- Added plain-text normalization for LaTeX style wrappers and operators such as
+  `\mathbf{...}` and `\operatorname{diag}` so common formulas render as
+  readable text like `P = diag(u) A diag(v)`.
+- Added cleanup for common display-math layout commands including `\boxed`,
+  `\begin{aligned}`, alignment `&`, LaTeX line breaks such as `\\[4pt]`,
+  `\big` sizing commands, and `\top`.
 
 ## Agent Guidelines
 
