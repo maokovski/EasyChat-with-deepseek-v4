@@ -1,6 +1,6 @@
 # AI Agent Project Notes
 
-Last updated: 2026-04-28
+Last updated: 2026-04-30
 
 This file is intended for AI coding agents that need to understand the current
 state of this repository before making changes.
@@ -11,14 +11,15 @@ Before making edits, also read `WORKFLOW.md` for the expected agent workflow.
 
 This is a small Windows-friendly Tkinter desktop chat client for DeepSeek's
 OpenAI-compatible chat API. The user-facing entrypoint is `ds_v4.py`, which
-re-exports and runs the implementation in `deepseek_api_client.py`.
+re-exports the compatibility surface from `deepseek_api_client.py`.
 
 ## Current Features
 
 - Tkinter desktop chat UI.
 - DeepSeek API access through the `openai` Python SDK.
 - Runtime configuration from `config.json`, created from defaults when missing.
-- Optional environment fallback for `DEEPSEEK_API_KEY` and `DEEPSEEK_BASE_URL`.
+- API credentials configured through `config.json` or the in-app API Settings
+  window.
 - System prompt loaded from `prompts.txt`.
 - Local conversation persistence under `conversations/`.
 - Session history list and session reload support.
@@ -59,12 +60,20 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 - The UI language can be switched at runtime between English and Chinese; source
   files keep Chinese UI strings as escaped Unicode so literal Chinese characters
   do not appear in project files.
+- Microsoft Edge extension prototype under `edge_extension/` with a Manifest V3
+  popup chat UI, local settings storage, transcript download, and active-page
+  context capture including visible page text and common interactive elements.
 
 ## Important Files
 
-- `deepseek_api_client.py`: Main application code. Contains runtime file setup,
-  config loading/saving, `DeepSeekClient`, formatting helpers, and
-  `DeepSeekChatApp`.
+- `deepseek_api_client.py`: Main Tkinter application code. Keeps public exports
+  for compatibility and contains `DeepSeekChatApp`, DPI setup, Markdown display
+  helpers, summary-memory orchestration, and GUI behavior.
+- `deepseek_client.py`: DeepSeek/OpenAI-compatible API wrapper, message typing,
+  and `DeepSeekV4Client` alias.
+- `config_store.py`: Runtime directory resolution, config loading/saving,
+  system prompt loading, and session file paths.
+- `ui_text.py`: English and Chinese UI text used by runtime language switching.
 - `ds_v4.py`: Compatibility entrypoint. Imports from `deepseek_api_client.py`
   and calls `main()` when executed.
 - `config.example.json`: Template config. Do not put real API keys in the repo.
@@ -81,7 +90,7 @@ re-exports and runs the implementation in `deepseek_api_client.py`.
 On startup, the app resolves its runtime directory differently depending on
 whether it is running from source or from a frozen executable:
 
-- Source run: the directory containing `deepseek_api_client.py`.
+- Source run: the directory containing `config_store.py`.
 - PyInstaller build: the directory containing the executable.
 
 The app ensures these runtime files exist:
@@ -155,8 +164,10 @@ dist/DeepSeekChat/DeepSeekChat.exe
 - Extended autolinking for source-style trailing website references such as
   `example.com/path` without an explicit protocol.
 - Current repository state observed:
-  - Main implementation is concentrated in `deepseek_api_client.py`.
+  - Main desktop UI implementation is concentrated in `deepseek_api_client.py`.
   - `ds_v4.py` is only a compatibility entrypoint.
+  - `edge_extension/` contains the browser extension prototype for the `edge`
+    branch.
   - User secrets and generated runtime/build output are ignored by Git.
   - Packaging is documented and automated through `build_exe.ps1`.
 
@@ -179,6 +190,18 @@ dist/DeepSeekChat/DeepSeekChat.exe
   grouped sidebar panels, a bordered top toolbar, a framed chat surface, and
   refreshed neutral/teal light and dark theme colors while preserving existing
   chat, history, model, thinking, API, language, theme, and resize behavior.
+- Added an unpacked Microsoft Edge extension prototype in `edge_extension/`.
+- The extension provides a popup chat UI with DeepSeek API settings, model and
+  thinking controls, theme/language options, local message persistence,
+  transcript export, and current-page context capture.
+- Expanded the Edge extension `Use Page` action so it injects a script into the
+  active tab and captures visible page text plus common interactive elements,
+  not only the title, URL, and selected text.
+- Split low-risk support code out of `deepseek_api_client.py`: runtime config
+  and paths now live in `config_store.py`, the API wrapper lives in
+  `deepseek_client.py`, and language text lives in `ui_text.py`.
+- Updated `WORKFLOW.md` with the new source layout and expanded Python compile
+  verification command.
 
 ## Agent Guidelines
 

@@ -25,7 +25,12 @@ Before editing:
 
 Current source layout:
 
-- `deepseek_api_client.py` owns application behavior.
+- `deepseek_api_client.py` owns the Tkinter application behavior and keeps the
+  public compatibility exports.
+- `deepseek_client.py` owns the DeepSeek/OpenAI-compatible API wrapper.
+- `config_store.py` owns runtime paths, config loading/saving, prompt loading,
+  and session file paths.
+- `ui_text.py` owns runtime UI language text.
 - `ds_v4.py` is the stable compatibility entrypoint.
 - `config.example.json` is a template only.
 - `prompts.txt` is runtime prompt content.
@@ -88,7 +93,7 @@ Choose verification based on the change:
 - For Python source changes, run:
 
 ```powershell
-python -m py_compile deepseek_api_client.py ds_v4.py
+python -m py_compile deepseek_api_client.py ds_v4.py config_store.py deepseek_client.py ui_text.py
 ```
 
 - For packaging changes, run:

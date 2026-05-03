@@ -17,6 +17,8 @@ OpenAI-compatible API.
 - Light and dark themes.
 - Small top-bar API settings window for editing the DeepSeek API key and base URL.
 - Runtime language switching between English and Chinese.
+- Microsoft Edge extension prototype under `edge_extension/` with a popup chat
+  UI, local settings, transcript export, and current-page context capture.
 - Optional one-folder Windows executable build with PyInstaller.
 
 ## Requirements
@@ -90,6 +92,36 @@ button.
 
 The system prompt is stored in `prompts.txt`.
 
+## Microsoft Edge Extension
+
+The `edge_extension/` folder contains an unpacked Microsoft Edge extension that
+offers a browser popup version of the chat client.
+
+Load it locally:
+
+```text
+edge://extensions
+```
+
+Enable Developer mode, choose `Load unpacked`, and select:
+
+```text
+edge_extension/
+```
+
+Open the extension popup, click Settings, and add your DeepSeek API key. The
+extension stores settings and conversation messages in `chrome.storage.local`;
+API keys are not committed to this repository.
+
+Extension capabilities:
+
+- DeepSeek V4 Pro and V4 Flash model selection.
+- Thinking mode selection: disabled, high, or max.
+- Light/dark theme and English/Chinese UI selection.
+- New chat, regenerate, clear, and transcript save actions.
+- `Use Page` action that adds the active tab title, URL, selected text, visible
+  page text, and common interactive elements to the composer.
+
 ## Local Data
 
 This repository does not include an API key.
@@ -102,6 +134,23 @@ Local runtime data is not committed:
 - `build/`
 
 Conversation sessions are saved in `conversations/sessions.json`.
+
+## Source Layout
+
+Run the desktop app through:
+
+```powershell
+python ds_v4.py
+```
+
+Key source files:
+
+- `ds_v4.py`: Stable compatibility entrypoint.
+- `deepseek_api_client.py`: Tkinter desktop UI and chat workflow.
+- `deepseek_client.py`: DeepSeek/OpenAI-compatible API wrapper.
+- `config_store.py`: Runtime paths, config, prompt, and session file locations.
+- `ui_text.py`: English and Chinese UI text.
+- `edge_extension/`: Unpacked Microsoft Edge extension prototype.
 
 ## Portable Windows Build
 
@@ -128,5 +177,5 @@ dist/DeepSeekChat/config.json
 Feature changes require editing the Python source files and rebuilding the
 portable app.
 
-The compatibility entrypoint is `ds_v4.py`; the main application implementation
-lives in `deepseek_api_client.py`.
+The compatibility entrypoint is `ds_v4.py`; keep `python ds_v4.py` as the
+desktop launch command.

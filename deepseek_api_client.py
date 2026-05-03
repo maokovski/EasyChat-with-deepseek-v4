@@ -20,79 +20,19 @@ import threading
 import tkinter as tk
 import time
 import webbrowser
-from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
-from typing import Any, Dict, Iterator, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 from ctypes import windll
 
-from openai import OpenAI
-
-
-Message = Dict[str, Any]
-ThinkingType = Literal["enabled", "disabled"]
-ReasoningEffort = Literal["high", "max"]
-
-
-def runtime_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
-
-
-APP_DIR = runtime_dir()
-CONFIG_PATH = APP_DIR / "config.json"
-PROMPTS_PATH = APP_DIR / "prompts.txt"
-CONVERSATIONS_DIR = APP_DIR / "conversations"
-SESSIONS_PATH = CONVERSATIONS_DIR / "sessions.json"
-
-
-DEFAULT_CONFIG: Dict[str, Any] = {
-    "DEEPSEEK_API_KEY": "",
-    "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
-    "default_model": "deepseek-v4-pro",
-    "thinking_modes": {
-        "deepseek-v4-pro": "disabled",
-        "deepseek-v4-flash": "disabled",
-    },
-    "theme": "light",
-    "language": "en",
-    "window_geometry": "980x680",
-    "sidebar_width": 218,
-}
-
-
-def ensure_runtime_files() -> None:
-    CONVERSATIONS_DIR.mkdir(exist_ok=True)
-    if not CONFIG_PATH.exists():
-        CONFIG_PATH.write_text(
-            json.dumps(DEFAULT_CONFIG, ensure_ascii=True, indent=2),
-            encoding="utf-8",
-        )
-    if not PROMPTS_PATH.exists():
-        PROMPTS_PATH.write_text("You are a helpful assistant.\n", encoding="utf-8")
-
-
-def load_config() -> Dict[str, Any]:
-    ensure_runtime_files()
-    try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    return {**DEFAULT_CONFIG, **data}
-
-
-def save_config(config: Dict[str, Any]) -> None:
-    ensure_runtime_files()
-    CONFIG_PATH.write_text(
-        json.dumps({**DEFAULT_CONFIG, **config}, ensure_ascii=True, indent=2),
-        encoding="utf-8",
-    )
-
-
-def load_system_prompt() -> str:
-    ensure_runtime_files()
-    prompt = PROMPTS_PATH.read_text(encoding="utf-8").strip()
-    return prompt or "You are a helpful assistant."
+from config_store import (
+    SESSIONS_PATH,
+    ensure_runtime_files,
+    load_config,
+    load_system_prompt,
+    save_config,
+)
+from deepseek_client import DeepSeekClient, DeepSeekV4Client, Message
+from ui_text import UI_TEXT
 
 
 def configure_windows_dpi_awareness() -> None:
@@ -111,118 +51,6 @@ def configure_tk_scaling(root: tk.Tk) -> None:
     pixels_per_inch = root.winfo_fpixels("1i")
     if pixels_per_inch > 0:
         root.tk.call("tk", "scaling", pixels_per_inch / 72.0)
-
-
-class DeepSeekClient:
-    """Small client for DeepSeek's OpenAI-compatible Chat API."""
-
-    DEFAULT_BASE_URL = "https://api.deepseek.com"
-    DEFAULT_MODEL = "deepseek-v4-pro"
-    FLASH_MODEL = "deepseek-v4-flash"
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-    ) -> None:
-        config = load_config()
-        self.api_key = api_key or str(config.get("DEEPSEEK_API_KEY") or "").strip()
-        if not self.api_key:
-            raise ValueError(
-                f"Missing DeepSeek API key. Open API Settings or fill {CONFIG_PATH.name}."
-            )
-
-        self.base_url = (
-            base_url
-            or str(config.get("DEEPSEEK_BASE_URL") or "").strip()
-            or self.DEFAULT_BASE_URL
-        )
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-
-    def chat(
-        self,
-        messages: List[Message],
-        model: str = DEFAULT_MODEL,
-        thinking: Optional[ThinkingType] = None,
-        reasoning_effort: ReasoningEffort = "high",
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stream: bool = False,
-        **kwargs: Any,
-    ) -> Any:
-        """Create a chat completion."""
-        if not messages:
-            raise ValueError("messages must contain at least one message.")
-
-        params: Dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-            "stream": stream,
-            **kwargs,
-        }
-
-        if temperature is not None:
-            params["temperature"] = temperature
-        if top_p is not None:
-            params["top_p"] = top_p
-        if max_tokens is not None:
-            params["max_tokens"] = max_tokens
-
-        if thinking is not None:
-            if thinking not in ("enabled", "disabled"):
-                raise ValueError('thinking must be "enabled", "disabled", or None.')
-            if reasoning_effort not in ("high", "max"):
-                raise ValueError('reasoning_effort must be "high" or "max".')
-
-            extra_body = dict(params.pop("extra_body", {}) or {})
-            extra_body["thinking"] = {"type": thinking}
-            params["extra_body"] = extra_body
-
-            if thinking == "enabled":
-                params["reasoning_effort"] = reasoning_effort
-
-        return self.client.chat.completions.create(**params)
-
-    def simple_chat(
-        self,
-        user_message: str,
-        system_message: str = "You are a helpful assistant.",
-        **kwargs: Any,
-    ) -> str:
-        """Send one user message and return assistant text."""
-        response = self.chat(
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message},
-            ],
-            **kwargs,
-        )
-        return response.choices[0].message.content or ""
-
-    def stream_chat(
-        self,
-        messages: List[Message],
-        include_reasoning: bool = False,
-        **kwargs: Any,
-    ) -> Iterator[str]:
-        """Stream assistant text chunks."""
-        response = self.chat(messages=messages, stream=True, **kwargs)
-        for chunk in response:
-            if not chunk.choices:
-                continue
-
-            delta = chunk.choices[0].delta
-            reasoning = getattr(delta, "reasoning_content", None)
-            content = getattr(delta, "content", None)
-
-            if include_reasoning and reasoning:
-                yield reasoning
-            if content:
-                yield content
-
-
-DeepSeekV4Client = DeepSeekClient
 
 
 CHAT_BODY_FONT = ("Microsoft YaHei UI", 12)
@@ -245,102 +73,6 @@ SUMMARY_SYSTEM_PROMPT = (
     "constraints, completed changes, todos, important facts, and preferences. "
     "Do not add information that is not present in the original messages."
 )
-UI_TEXT = {
-    "en": {
-        "new_chat": "New Chat",
-        "current_model": "Current Model",
-        "thinking": "Thinking",
-        "thinking_off": "Off",
-        "history": "History",
-        "theme_light": "Light",
-        "theme_dark": "Dark",
-        "api_settings": "API Settings",
-        "regenerate": "Regenerate",
-        "save_txt": "Save .txt",
-        "clear": "Clear",
-        "initial_hint": "Type below. Enter sends, Shift+Enter inserts a new line.",
-        "image": "Image",
-        "new_session_title": "New chat",
-        "untitled_chat": "Untitled chat",
-        "new_chat_started": "New chat started. Enter sends, Shift+Enter inserts a new line.",
-        "please_wait": "Please Wait",
-        "api_busy": "A request is still running. Change API settings after it finishes.",
-        "api_key_missing_title": "DeepSeek API Key Missing",
-        "api_key_missing_body": "Please open API Settings or fill config.json next to this program.",
-        "api_saved_title": "API Settings Saved",
-        "api_saved_error": "Settings were saved, but the client could not start:",
-        "api_saved_ok": "API settings saved and applied.",
-        "api_required": "API Key is required before requests can be sent.",
-        "show_api_key": "Show API Key",
-        "cancel": "Cancel",
-        "save": "Save",
-        "cannot_regenerate": "Cannot Regenerate",
-        "no_regenerate_chat": "There is no conversation to regenerate yet.",
-        "send_first": "Please send a question first.",
-        "regenerate_notice": "Regenerating the previous answer.",
-        "nothing_to_save": "Nothing To Save",
-        "empty_session": "The current session has no content.",
-        "save_current_session": "Save Current Session",
-        "this_conversation": "this conversation",
-        "delete_history": "Delete History",
-        "delete_confirm": "Delete \"{title}\"?\n\nThis cannot be undone.",
-        "history_deleted": "History deleted. Enter sends, Shift+Enter inserts a new line.",
-        "cannot_delete": "Cannot Delete",
-        "select_history": "Select a history item on the left first.",
-        "cleared": "Cleared. Enter sends, Shift+Enter inserts a new line.",
-        "summary_none": "None.",
-        "summary_prompt": "Existing summary:\n{old_summary}\n\nOlder messages to merge:\n{new_context}\n\nOutput the updated summary.",
-        "summary_context": "A compressed summary of earlier messages follows. Use it as long-term context, while prioritizing the recent full messages:\n{summary}",
-        "language": "Language",
-    },
-    "zh": {
-        "new_chat": "\u65b0\u5bf9\u8bdd",
-        "current_model": "\u5f53\u524d\u6a21\u578b",
-        "thinking": "\u601d\u8003",
-        "thinking_off": "\u5173\u95ed",
-        "history": "\u5bf9\u8bdd\u8bb0\u5f55",
-        "theme_light": "\u6d45\u8272",
-        "theme_dark": "\u6df1\u8272",
-        "api_settings": "API \u8bbe\u7f6e",
-        "regenerate": "\u91cd\u65b0\u751f\u6210",
-        "save_txt": "\u4fdd\u5b58 .txt",
-        "clear": "\u6e05\u5c4f",
-        "initial_hint": "\u5728\u4e0b\u65b9\u8f93\u5165\u95ee\u9898\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
-        "image": "\u56fe\u7247",
-        "new_session_title": "\u65b0\u5bf9\u8bdd",
-        "untitled_chat": "\u672a\u547d\u540d\u5bf9\u8bdd",
-        "new_chat_started": "\u65b0\u5bf9\u8bdd\u5df2\u5f00\u59cb\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
-        "please_wait": "\u8bf7\u7a0d\u5019",
-        "api_busy": "\u5f53\u524d\u8bf7\u6c42\u8fd8\u5728\u8fdb\u884c\u4e2d\uff0c\u8bf7\u7ed3\u675f\u540e\u518d\u4fee\u6539 API \u8bbe\u7f6e\u3002",
-        "api_key_missing_title": "DeepSeek API Key \u7f3a\u5931",
-        "api_key_missing_body": "\u8bf7\u6253\u5f00 API \u8bbe\u7f6e\uff0c\u6216\u586b\u5199\u7a0b\u5e8f\u65c1\u7684 config.json\u3002",
-        "api_saved_title": "API \u8bbe\u7f6e\u5df2\u4fdd\u5b58",
-        "api_saved_error": "\u914d\u7f6e\u5df2\u4fdd\u5b58\uff0c\u4f46\u5ba2\u6237\u7aef\u521d\u59cb\u5316\u5931\u8d25\uff1a",
-        "api_saved_ok": "API \u8bbe\u7f6e\u5df2\u4fdd\u5b58\u5e76\u751f\u6548\u3002",
-        "api_required": "\u53d1\u9001\u8bf7\u6c42\u524d\u5fc5\u987b\u586b\u5199 API Key\u3002",
-        "show_api_key": "\u663e\u793a API Key",
-        "cancel": "\u53d6\u6d88",
-        "save": "\u4fdd\u5b58",
-        "cannot_regenerate": "\u65e0\u6cd5\u91cd\u65b0\u751f\u6210",
-        "no_regenerate_chat": "\u8fd8\u6ca1\u6709\u53ef\u4ee5\u91cd\u65b0\u751f\u6210\u7684\u5bf9\u8bdd\u3002",
-        "send_first": "\u8bf7\u5148\u53d1\u9001\u4e00\u4e2a\u95ee\u9898\u3002",
-        "regenerate_notice": "\u91cd\u65b0\u751f\u6210\u4e0a\u4e00\u6761\u56de\u590d\u3002",
-        "nothing_to_save": "\u65e0\u9700\u4fdd\u5b58",
-        "empty_session": "\u5f53\u524d\u4f1a\u8bdd\u6ca1\u6709\u5185\u5bb9\u3002",
-        "save_current_session": "\u4fdd\u5b58\u5f53\u524d\u4f1a\u8bdd",
-        "this_conversation": "\u8fd9\u6761\u5bf9\u8bdd",
-        "delete_history": "\u5220\u9664\u5386\u53f2\u8bb0\u5f55",
-        "delete_confirm": "\u786e\u5b9a\u5220\u9664\u300c{title}\u300d\u5417\uff1f\n\n\u6b64\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002",
-        "history_deleted": "\u5386\u53f2\u8bb0\u5f55\u5df2\u5220\u9664\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
-        "cannot_delete": "\u65e0\u6cd5\u5220\u9664",
-        "select_history": "\u8bf7\u5148\u5728\u5de6\u4fa7\u9009\u62e9\u4e00\u6761\u5386\u53f2\u8bb0\u5f55\u3002",
-        "cleared": "\u5df2\u6e05\u5c4f\u3002Enter \u53d1\u9001\uff0cShift+Enter \u6362\u884c\u3002",
-        "summary_none": "\u65e0\u3002",
-        "summary_prompt": "\u5df2\u6709\u6458\u8981\uff1a\n{old_summary}\n\n\u9700\u8981\u5e76\u5165\u6458\u8981\u7684\u65e7\u5bf9\u8bdd\uff1a\n{new_context}\n\n\u8bf7\u8f93\u51fa\u66f4\u65b0\u540e\u7684\u6458\u8981\u3002",
-        "summary_context": "\u6b64\u524d\u8f83\u65e9\u5bf9\u8bdd\u7684\u538b\u7f29\u6458\u8981\u5982\u4e0b\u3002\u56de\u7b54\u65f6\u8bf7\u628a\u5b83\u4f5c\u4e3a\u957f\u671f\u4e0a\u4e0b\u6587\u53c2\u8003\uff0c\u540c\u65f6\u4f18\u5148\u9075\u5faa\u6700\u8fd1\u539f\u6587\u6d88\u606f\uff1a\n{summary}",
-        "language": "\u8bed\u8a00",
-    },
-}
 EMOJI_PATTERN = re.compile(
     "["
     "\U0001f1e6-\U0001f1ff"

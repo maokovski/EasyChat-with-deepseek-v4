@@ -1,0 +1,210 @@
+:root {
+  color-scheme: light;
+  --page: #f4f6f2;
+  --panel: #fffefa;
+  --panel-2: #eef3ec;
+  --text: #1b211f;
+  --muted: #66726c;
+  --border: #cdd8cf;
+  --accent: #0f8f75;
+  --accent-hover: #0a755f;
+  --accent-text: #ffffff;
+  --danger: #b42318;
+}
+
+body.dark {
+  color-scheme: dark;
+  --page: #171a1f;
+  --panel: #1f242b;
+  --panel-2: #242b33;
+  --text: #f2f3ef;
+  --muted: #a8b0b6;
+  --border: #343c46;
+  --accent: #3dd6b3;
+  --accent-hover: #66e4c9;
+  --accent-text: #061613;
+  --danger: #ff8a80;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 430px;
+  min-height: 560px;
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: color-mix(in srgb, var(--panel-2), var(--accent) 10%);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  min-height: 560px;
+  padding: 12px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.icon-button {
+  min-width: 84px;
+}
+
+.settings-panel,
+.composer {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 12px;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--page);
+  color: var(--text);
+  padding: 8px 9px;
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.primary-button,
+.send-button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.primary-button:hover,
+.send-button:hover {
+  background: var(--accent-hover);
+}
+
+.messages {
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 260px;
+  max-height: 390px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.message {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--page);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.message.user {
+  background: color-mix(in srgb, var(--accent), var(--panel) 84%);
+}
+
+.message.system {
+  color: var(--muted);
+  background: transparent;
+}
+
+.speaker {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.composer {
+  display: grid;
+  gap: 10px;
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.composer-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.send-button {
+  grid-column: span 3;
+}
