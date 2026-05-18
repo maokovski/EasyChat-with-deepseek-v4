@@ -9,5 +9,8 @@
   "theme": "light",
   "language": "en",
   "window_geometry": "980x680",
-  "sidebar_width": 218
+  "sidebar_width": 218,
+  "quick_bar_enabled": true,
+  "quick_bar_side": "right",
+  "quick_bar_y": null
 }

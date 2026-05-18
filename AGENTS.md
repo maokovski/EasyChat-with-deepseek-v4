@@ -55,12 +55,15 @@ re-exports the compatibility surface from `deepseek_api_client.py`.
 - Sidebar action buttons use emoji-leading labels for a more consistent visual
   language.
 - Portable Windows build flow through `build_exe.ps1` and PyInstaller.
-- A compact API settings subwindow is available from the top bar for editing
-  the DeepSeek API key and base URL without manually opening `config.json`.
+- A unified settings window is available from the top-bar gear entry, with
+  category navigation for API, appearance, model, and quick bar behavior.
 - The desktop UI follows a workstation layout with a history-focused left
   sidebar, top toolbar, central chat surface, bottom composer, and a toggleable
   right Inspector column for model controls, thinking mode, session counts, and
   summary-memory state.
+- The desktop UI includes an always-on-top draggable edge quick bar with status
+  text, background run timing, and slide transitions for summoning or hiding the
+  full chat window without replacing the main workstation layout.
 - Assistant replies stream into the chat UI incrementally through the
   OpenAI-compatible DeepSeek streaming API, then re-render through the existing
   Markdown display path once the response finishes.
@@ -72,6 +75,10 @@ re-exports the compatibility surface from `deepseek_api_client.py`.
 - Microsoft Edge extension prototype under `edge_extension/` with a Manifest V3
   popup chat UI, local settings storage, transcript download, and active-page
   context capture including visible page text and common interactive elements.
+- The Edge extension popup uses a two-column chat-plus-Inspector layout,
+  streams DeepSeek replies via SSE, renders fenced code blocks with copy
+  controls, and normalizes common LaTeX formulas to readable plain text for
+  display and transcript export.
 
 ## Important Files
 
@@ -235,6 +242,32 @@ dist/DeepSeekChat/DeepSeekChat.exe
 - Added cleanup for common display-math layout commands including `\boxed`,
   `\begin{aligned}`, alignment `&`, LaTeX line breaks such as `\\[4pt]`,
   `\big` sizing commands, and `\top`.
+- Updated the Edge extension popup to mirror the desktop UX direction: chat and
+  composer in the main column, settings/model controls in a toggleable
+  Inspector column, streaming DeepSeek responses, message/code copy controls,
+  and the same plain-text formula normalization for displayed assistant output.
+
+### 2026-05-18
+
+- Added an always-on-top desktop quick bar as a draggable edge handle for
+  quickly showing or hiding the full Tkinter chat window.
+- The main window close action now hides to the quick bar while the quick bar
+  context menu provides the explicit app exit action.
+- Added a top-bar control for manually sending the main chat window to the quick
+  bar, preserving the existing workstation-style chat layout.
+- The quick bar is now a slim vertical strip with a busy/ready status mark,
+  saved left/right dock side and vertical position, plus right-click shortcuts
+  for new chat, API settings, theme toggle, and exit.
+- Quick bar branding is drawn character-by-character on a Canvas to avoid
+  font/DPI line-height overlap, and the main window slides in or out from the
+  bar's dock side when shown or hidden.
+- The quick bar is wide enough to show ready/running state text and a `mm:ss`
+  timer while a DeepSeek request is streaming in the background.
+- Quick bar dimensions are content-aware: height is derived from the vertical
+  brand text and status area, with a longer default rail for readability.
+- Replaced the old API-only settings dialog with a unified settings page
+  inspired by editor-style settings views: left category navigation and a right
+  settings pane for API, appearance, model, and quick bar options.
 
 ## Agent Guidelines
 

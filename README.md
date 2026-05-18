@@ -15,8 +15,13 @@ OpenAI-compatible API.
   links, superscript/subscript, and emoji.
 - Clickable links open in the system default browser.
 - Light and dark themes.
-- Small top-bar API settings window for editing the DeepSeek API key and base URL.
+- Unified settings window with a gear entry in the top bar, using a
+  category-based layout for API, appearance, model, and quick bar settings.
 - Runtime language switching between English and Chinese.
+- Always-on-top draggable edge bar for quickly hiding and summoning the full
+  chat window with a slide transition, clear vertical branding, status text,
+  background run timer, adaptive height for its text, and right-click shortcuts
+  for new chat, settings, theme, and exit.
 - Microsoft Edge extension prototype under `edge_extension/` with a popup chat
   UI, local settings, transcript export, and current-page context capture.
 - Optional one-folder Windows executable build with PyInstaller.
@@ -63,7 +68,10 @@ Edit `config.json` and add your DeepSeek API key:
   "theme": "light",
   "language": "en",
   "window_geometry": "980x680",
-  "sidebar_width": 218
+  "sidebar_width": 218,
+  "quick_bar_enabled": true,
+  "quick_bar_side": "right",
+  "quick_bar_y": null
 }
 ```
 
@@ -86,6 +94,9 @@ Git.
 - `language`: `en` or `zh`.
 - `window_geometry`: Initial Tkinter window size.
 - `sidebar_width`: Saved sidebar width in pixels.
+- `quick_bar_enabled`: Show the always-on-top edge bar for summoning the chat.
+- `quick_bar_side`: Saved quick bar dock side, `left` or `right`.
+- `quick_bar_y`: Saved quick bar vertical position, or `null` for centered.
 
 The same API key and base URL can also be edited from the top-bar API Settings
 button.

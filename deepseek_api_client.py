@@ -459,6 +459,8 @@ class DeepSeekChatApp:
         self.conversation_count = 0
         self.result_queue: "queue.Queue[tuple[str, int, str, float, str, str, int]]" = queue.Queue()
         self.is_waiting = False
+        self.request_started_at: Optional[float] = None
+        self.quick_bar_last_timer_second = -1
         self.streaming_response_active = False
         self.dark_mode = str(self.app_config.get("theme") or "light") == "dark"
         self.language = self._normalize_language(str(self.app_config.get("language") or "en"))
@@ -478,6 +480,23 @@ class DeepSeekChatApp:
         self.link_count = 0
         self.history_rows: List[tuple[tk.Frame, tk.Button, tk.Button]] = []
         self.api_settings_window: Optional[tk.Toplevel] = None
+        self.quick_bar_enabled = bool(self.app_config.get("quick_bar_enabled", True))
+        self.quick_bar: Optional[tk.Toplevel] = None
+        self.quick_bar_frame: Optional[tk.Frame] = None
+        self.quick_bar_canvas: Optional[tk.Canvas] = None
+        self.quick_bar_label: Optional[tk.Label] = None
+        self.quick_bar_hint: Optional[tk.Label] = None
+        self.quick_bar_status: Optional[tk.Frame] = None
+        self.quick_bar_menu: Optional[tk.Menu] = None
+        self.quick_bar_side = self._normalize_quick_bar_side(self.app_config.get("quick_bar_side"))
+        self.quick_bar_drag_start_x = 0
+        self.quick_bar_drag_start_y = 0
+        self.quick_bar_origin_x = 0
+        self.quick_bar_origin_y = 0
+        self.quick_bar_dragged = False
+        self.quick_bar_animating = False
+        self.main_window_hidden = False
+        self.shutdown_requested = False
         self.style = ttk.Style()
 
         self._build_ui()
@@ -633,13 +652,24 @@ class DeepSeekChatApp:
         )
         self.inspector_button.grid(row=0, column=3, sticky="e", padx=(12, 0), pady=8)
 
+        self.quick_bar_button = tk.Button(
+            self.topbar,
+            text=self._text("quick_bar"),
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=4,
+            command=self.hide_main_window,
+        )
+        self.quick_bar_button.grid(row=0, column=4, sticky="e", padx=(8, 0), pady=8)
+
         self.language_label = tk.Label(
             self.topbar,
             text=self._text("language"),
             anchor="e",
             font=("Segoe UI", 9),
         )
-        self.language_label.grid(row=0, column=4, sticky="e", padx=(14, 6), pady=8)
+        self.language_label.grid(row=0, column=5, sticky="e", padx=(14, 6), pady=8)
 
         self.language_var = tk.StringVar(value=self._language_display_name(self.language))
         self.language_menu = tk.OptionMenu(
@@ -650,18 +680,18 @@ class DeepSeekChatApp:
             command=lambda _value: self.set_language_from_menu(),
         )
         self.language_menu.configure(relief=tk.FLAT, bd=0, highlightthickness=0)
-        self.language_menu.grid(row=0, column=5, sticky="e", padx=(0, 8), pady=8)
+        self.language_menu.grid(row=0, column=6, sticky="e", padx=(0, 8), pady=8)
 
         self.api_settings_button = tk.Button(
             self.topbar,
-            text=self._text("api_settings"),
+            text=f"\u2699 {self._text('settings')}",
             relief=tk.FLAT,
             bd=0,
             padx=10,
             pady=4,
             command=self.open_api_settings,
         )
-        self.api_settings_button.grid(row=0, column=6, sticky="e", padx=(0, 10), pady=8)
+        self.api_settings_button.grid(row=0, column=7, sticky="e", padx=(0, 10), pady=8)
 
         self.chat_panel = tk.Frame(self.content_frame, bd=0, highlightthickness=1)
         self.chat_panel.grid(row=1, column=0, sticky="nsew", padx=(24, 0), pady=(0, 10))
@@ -930,6 +960,375 @@ class DeepSeekChatApp:
         )
         self._refresh_model_display()
         self.apply_theme()
+        self._build_quick_bar()
+        self.apply_theme()
+
+    def _build_quick_bar(self) -> None:
+        if not self.quick_bar_enabled or self.quick_bar is not None:
+            return
+
+        bar = tk.Toplevel(self.root)
+        self.quick_bar = bar
+        bar.withdraw()
+        bar.overrideredirect(True)
+        bar.attributes("-topmost", True)
+        try:
+            bar.attributes("-toolwindow", True)
+        except tk.TclError:
+            pass
+        bar.resizable(False, False)
+        bar.columnconfigure(0, weight=1)
+        bar.rowconfigure(0, weight=1)
+
+        width, height = self._quick_bar_size()
+        self.quick_bar_frame = tk.Frame(
+            bar,
+            width=width,
+            height=height,
+            bd=0,
+            highlightthickness=1,
+        )
+        self.quick_bar_frame.grid(row=0, column=0, sticky="nsew")
+        self.quick_bar_frame.grid_propagate(False)
+        self.quick_bar_frame.columnconfigure(0, weight=1)
+        self.quick_bar_frame.rowconfigure(0, weight=1)
+
+        self.quick_bar_canvas = tk.Canvas(
+            self.quick_bar_frame,
+            width=width,
+            height=height,
+            bd=0,
+            highlightthickness=0,
+            relief=tk.FLAT,
+        )
+        self.quick_bar_canvas.grid(row=0, column=0, sticky="nsew")
+
+        self.quick_bar_menu = tk.Menu(bar, tearoff=0)
+        self._refresh_quick_bar_menu()
+
+        quick_bar_widgets = (
+            bar,
+            self.quick_bar_frame,
+            self.quick_bar_canvas,
+        )
+        for widget in quick_bar_widgets:
+            widget.bind("<ButtonPress-1>", self._start_quick_bar_drag)
+            widget.bind("<B1-Motion>", self._drag_quick_bar)
+            widget.bind("<ButtonRelease-1>", self._finish_quick_bar_drag)
+            widget.bind("<Button-3>", self._show_quick_bar_menu)
+            widget.bind("<Enter>", self._quick_bar_enter)
+            widget.bind("<Leave>", self._quick_bar_leave)
+
+        self._position_quick_bar()
+        bar.deiconify()
+
+    def _position_quick_bar(self) -> None:
+        if self.quick_bar is None:
+            return
+
+        self.quick_bar.update_idletasks()
+        width, height = self._quick_bar_size()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        side = self._normalize_quick_bar_side(self.app_config.get("quick_bar_side"))
+        x = 2 if side == "left" else max(0, screen_width - width - 2)
+        y = self._normalize_quick_bar_y(self.app_config.get("quick_bar_y"), screen_height, height)
+        self.quick_bar.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _quick_bar_size(self) -> tuple[int, int]:
+        brand_chars = len(self._quick_bar_brand())
+        status_chars = max(
+            len(self._text("quick_bar_ready")),
+            len(self._text("quick_bar_running")),
+        )
+        width = max(54, min(74, 34 + status_chars * 5))
+        height = max(392, 124 + brand_chars * 20 + 82)
+        return width, height
+
+    def _quick_bar_brand(self) -> str:
+        return "EASYCHAT"
+
+    def _quick_bar_elapsed_seconds(self) -> int:
+        if not self.is_waiting or self.request_started_at is None:
+            return 0
+        return max(0, int(time.perf_counter() - self.request_started_at))
+
+    def _format_quick_bar_elapsed(self) -> str:
+        seconds = self._quick_bar_elapsed_seconds()
+        minutes, seconds = divmod(seconds, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def _draw_quick_bar(
+        self,
+        panel_bg: str,
+        border: str,
+        fg: str,
+        muted: str,
+        accent_bg: str,
+        accent_fg: str,
+    ) -> None:
+        if self.quick_bar_canvas is None:
+            return
+
+        width, height = self._quick_bar_size()
+        side = self._normalize_quick_bar_side(self.app_config.get("quick_bar_side"))
+        status_fill = "#f0b429" if self.is_waiting else ("#6ee7b7" if self.dark_mode else "#0f8f75")
+        stripe_x = width - 4 if side == "left" else 0
+        state_text = self._text("quick_bar_running") if self.is_waiting else self._text("quick_bar_ready")
+        elapsed_text = self._format_quick_bar_elapsed() if self.is_waiting else "--:--"
+
+        canvas = self.quick_bar_canvas
+        canvas.configure(width=width, height=height, bg=panel_bg)
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width - 1, height - 1, fill=panel_bg, outline=border)
+        canvas.create_rectangle(stripe_x, 0, stripe_x + 3, height, fill=accent_bg, outline=accent_bg)
+        canvas.create_rectangle(15, 14, width - 15, 17, fill=muted, outline=muted)
+        canvas.create_oval(width // 2 - 5, 30, width // 2 + 5, 40, fill=status_fill, outline=status_fill)
+        canvas.create_text(
+            width // 2,
+            58,
+            text=state_text,
+            fill=fg,
+            font=("Microsoft YaHei UI", 8, "bold"),
+        )
+        canvas.create_text(
+            width // 2,
+            78,
+            text=elapsed_text,
+            fill=muted if not self.is_waiting else fg,
+            font=("Cascadia Mono", 8, "bold"),
+        )
+        canvas.create_line(13, 96, width - 13, 96, fill=border)
+        brand = self._quick_bar_brand()
+        brand_start_y = 128
+        brand_step = max(18, min(22, (height - 206) // max(1, len(brand) - 1)))
+        for index, char in enumerate(brand):
+            canvas.create_text(
+                width // 2,
+                brand_start_y + index * brand_step,
+                text=char,
+                fill=fg,
+                font=("Segoe UI", 9, "bold"),
+            )
+        canvas.create_rectangle(10, height - 48, width - 10, height - 20, fill=accent_bg, outline=accent_bg)
+        canvas.create_text(
+            width // 2,
+            height - 34,
+            text="AI",
+            fill=accent_fg,
+            font=("Segoe UI", 9, "bold"),
+        )
+
+    def _normalize_quick_bar_side(self, side: Any) -> str:
+        return "left" if str(side) == "left" else "right"
+
+    def _normalize_quick_bar_y(self, value: Any, screen_height: int, height: int) -> int:
+        try:
+            y = int(value)
+        except (TypeError, ValueError):
+            y = (screen_height - height) // 2
+        return max(8, min(y, max(8, screen_height - height - 8)))
+
+    def _parse_window_geometry(self, geometry: str) -> Optional[tuple[int, int, int, int]]:
+        match = re.match(r"^(\d+)x(\d+)([+-]\d+)([+-]\d+)$", str(geometry).strip())
+        if not match:
+            return None
+        return (
+            int(match.group(1)),
+            int(match.group(2)),
+            int(match.group(3)),
+            int(match.group(4)),
+        )
+
+    def _current_main_geometry(self) -> tuple[int, int, int, int]:
+        self.root.update_idletasks()
+        parsed = self._parse_window_geometry(self.root.geometry())
+        if parsed is not None:
+            return parsed
+        return (
+            max(860, self.root.winfo_width()),
+            max(520, self.root.winfo_height()),
+            self.root.winfo_x(),
+            self.root.winfo_y(),
+        )
+
+    def _offscreen_x_for_quick_bar_side(self, width: int) -> int:
+        side = self._normalize_quick_bar_side(self.app_config.get("quick_bar_side"))
+        if side == "left":
+            return 18 - width
+        return self.root.winfo_screenwidth() - 18
+
+    def _animate_main_window(
+        self,
+        start: tuple[int, int, int, int],
+        end: tuple[int, int, int, int],
+        on_done: Optional[Any] = None,
+    ) -> None:
+        if self.quick_bar_animating:
+            return
+
+        self.quick_bar_animating = True
+        frames = 10
+        interval_ms = 14
+
+        def step(frame: int) -> None:
+            if not self.root.winfo_exists():
+                return
+
+            t = min(1.0, frame / frames)
+            eased = 1 - (1 - t) ** 3
+            width = round(start[0] + (end[0] - start[0]) * eased)
+            height = round(start[1] + (end[1] - start[1]) * eased)
+            x = round(start[2] + (end[2] - start[2]) * eased)
+            y = round(start[3] + (end[3] - start[3]) * eased)
+            self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+            if frame >= frames:
+                self.quick_bar_animating = False
+                if on_done is not None:
+                    on_done()
+                return
+
+            self.root.after(interval_ms, lambda: step(frame + 1))
+
+        step(0)
+
+    def _refresh_quick_bar_menu(self) -> None:
+        if self.quick_bar_menu is None:
+            return
+        self.quick_bar_menu.delete(0, tk.END)
+        self.quick_bar_menu.add_command(
+            label=self._text("quick_bar_show") if self.main_window_hidden else self._text("quick_bar_hide"),
+            command=self._toggle_main_window_from_bar,
+        )
+        self.quick_bar_menu.add_command(label=self._text("quick_bar_new"), command=self._new_chat_from_bar)
+        self.quick_bar_menu.add_command(label=self._text("quick_bar_settings"), command=self._open_api_settings_from_bar)
+        self.quick_bar_menu.add_command(label=self._text("quick_bar_theme"), command=self.toggle_theme)
+        self.quick_bar_menu.add_separator()
+        self.quick_bar_menu.add_command(label=self._text("quick_bar_exit"), command=self.exit_app)
+
+    def _show_quick_bar_menu(self, event: tk.Event) -> str:
+        self._refresh_quick_bar_menu()
+        if self.quick_bar_menu is not None:
+            self.quick_bar_menu.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    def _quick_bar_enter(self, _event: tk.Event) -> None:
+        if self.quick_bar_frame is not None:
+            self.quick_bar_frame.configure(cursor="fleur")
+
+    def _quick_bar_leave(self, _event: tk.Event) -> None:
+        if self.quick_bar_frame is not None:
+            self.quick_bar_frame.configure(cursor="")
+
+    def _toggle_main_window_from_bar(self, _event: Optional[tk.Event] = None) -> str:
+        if self.main_window_hidden or not self.root.winfo_viewable():
+            self.show_main_window()
+        else:
+            self.hide_main_window()
+        return "break"
+
+    def _new_chat_from_bar(self) -> None:
+        self.show_main_window()
+        self.new_chat()
+
+    def _open_api_settings_from_bar(self) -> None:
+        self.show_main_window()
+        self.open_api_settings()
+
+    def _start_quick_bar_drag(self, event: tk.Event) -> None:
+        if self.quick_bar is None:
+            return
+        self.quick_bar_drag_start_x = int(event.x_root)
+        self.quick_bar_drag_start_y = int(event.y_root)
+        self.quick_bar_origin_x = self.quick_bar.winfo_x()
+        self.quick_bar_origin_y = self.quick_bar.winfo_y()
+        self.quick_bar_dragged = False
+
+    def _drag_quick_bar(self, event: tk.Event) -> None:
+        if self.quick_bar is None:
+            return
+        dx = int(event.x_root) - self.quick_bar_drag_start_x
+        dy = int(event.y_root) - self.quick_bar_drag_start_y
+        if abs(dx) > 3 or abs(dy) > 3:
+            self.quick_bar_dragged = True
+        width, height = self._quick_bar_size()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = max(0, min(self.quick_bar_origin_x + dx, screen_width - width))
+        y = max(8, min(self.quick_bar_origin_y + dy, max(8, screen_height - height - 8)))
+        self.quick_bar.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _finish_quick_bar_drag(self, event: tk.Event) -> str:
+        if self.quick_bar is None:
+            return "break"
+        if not self.quick_bar_dragged:
+            return self._toggle_main_window_from_bar(event)
+
+        width, height = self._quick_bar_size()
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        current_x = self.quick_bar.winfo_x()
+        current_y = self.quick_bar.winfo_y()
+        self.quick_bar_side = "left" if current_x < screen_width // 2 else "right"
+        x = 2 if self.quick_bar_side == "left" else max(0, screen_width - width - 2)
+        y = self._normalize_quick_bar_y(current_y, screen_height, height)
+        self.quick_bar.geometry(f"{width}x{height}+{x}+{y}")
+        self.app_config["quick_bar_side"] = self.quick_bar_side
+        self.app_config["quick_bar_y"] = y
+        save_config(self.app_config)
+        return "break"
+
+    def hide_main_window(self) -> None:
+        if not self.quick_bar_enabled:
+            self.root.iconify()
+            return
+        if self.quick_bar_animating:
+            return
+
+        self._save_current_session()
+        saved_geometry = self.root.geometry()
+        self.app_config["window_geometry"] = saved_geometry
+        save_config(self.app_config)
+        start = self._current_main_geometry()
+        end = (start[0], start[1], self._offscreen_x_for_quick_bar_side(start[0]), start[3])
+
+        def finish_hide() -> None:
+            self.root.withdraw()
+            self.root.geometry(saved_geometry)
+            self.main_window_hidden = True
+            self._refresh_quick_bar_menu()
+
+        self._animate_main_window(start, end, finish_hide)
+
+    def show_main_window(self) -> None:
+        if self.quick_bar_animating:
+            return
+
+        target_geometry = str(self.app_config.get("window_geometry") or self.root.geometry())
+        target = self._parse_window_geometry(target_geometry) or self._current_main_geometry()
+        start = (target[0], target[1], self._offscreen_x_for_quick_bar_side(target[0]), target[3])
+        self.root.geometry(f"{start[0]}x{start[1]}+{start[2]}+{start[3]}")
+        self.root.deiconify()
+        self.root.lift()
+
+        def finish_show() -> None:
+            self.root.focus_force()
+            self.main_window_hidden = False
+            self._refresh_quick_bar_menu()
+            self.input_box.focus_set()
+
+        self._animate_main_window(start, target, finish_show)
+
+    def exit_app(self) -> None:
+        self.shutdown_requested = True
+        self._save_current_session()
+        if self.root.winfo_exists():
+            self.app_config["window_geometry"] = self.root.geometry()
+        save_config(self.app_config)
+        if self.quick_bar is not None and self.quick_bar.winfo_exists():
+            self.quick_bar.destroy()
+        self.root.destroy()
 
     def _append_chat(self, speaker: str, text: str, tag: str = "assistant") -> None:
         if speaker.startswith("Conversation") and "DeepSeek" in speaker:
@@ -1275,15 +1674,17 @@ class DeepSeekChatApp:
         self.model_title.configure(text=self._text("current_model"))
         self.history_title.configure(text=self._text("history"))
         self.inspector_button.configure(text=self._text("inspector"))
+        self.quick_bar_button.configure(text=self._text("quick_bar"))
         self.inspector_title.configure(text=self._text("inspector"))
         self.session_title_label.configure(text=self._text("session_state"))
         self.regenerate_button.configure(text=f"R  {self._text('regenerate')}")
         self.save_button.configure(text=f"S  {self._text('save_txt')}")
         self.clear_button.configure(text=f"C  {self._text('clear')}")
-        self.api_settings_button.configure(text=self._text("api_settings"))
+        self.api_settings_button.configure(text=f"\u2699 {self._text('settings')}")
         self.language_label.configure(text=self._text("language"))
         self.language_var.set(self._language_display_name(self.language))
         self._refresh_chat_context_menu()
+        self._refresh_quick_bar_menu()
         self._refresh_model_display()
         self._refresh_inspector()
 
@@ -1521,6 +1922,23 @@ class DeepSeekChatApp:
 
         self.root.configure(bg=page_bg)
         self.main_frame.configure(bg=page_bg)
+        if self.quick_bar is not None and self.quick_bar.winfo_exists():
+            rail_bg = "#151a20" if self.dark_mode else "#f8faf7"
+            self.quick_bar.configure(bg=rail_bg)
+            if self.quick_bar_frame is not None:
+                self.quick_bar_frame.configure(
+                    bg=rail_bg,
+                    highlightbackground=border,
+                    highlightcolor=border,
+                )
+            self._draw_quick_bar(rail_bg, border, fg, muted, accent_bg, accent_fg)
+            if self.quick_bar_menu is not None:
+                self.quick_bar_menu.configure(
+                    bg=button_bg,
+                    fg=fg,
+                    activebackground=button_hover,
+                    activeforeground=fg,
+                )
         self.sidebar.configure(bg=sidebar_bg)
         self.sidebar_resize_handle.configure(bg=border)
         self.sidebar_header.configure(bg=sidebar_bg)
@@ -1599,6 +2017,11 @@ class DeepSeekChatApp:
         self.model_badge.configure(bg=selected_bg, fg=muted)
         self._configure_hover_button(self.inspector_button, button_bg, button_hover, fg)
         self.inspector_button.configure(
+            highlightbackground=panel_bg,
+            highlightcolor=fg,
+        )
+        self._configure_hover_button(self.quick_bar_button, button_bg, button_hover, fg)
+        self.quick_bar_button.configure(
             highlightbackground=panel_bg,
             highlightcolor=fg,
         )
@@ -1808,132 +2231,317 @@ class DeepSeekChatApp:
 
         window = tk.Toplevel(self.root)
         self.api_settings_window = window
-        window.title(self._text("api_settings"))
-        window.resizable(False, False)
+        window.title(self._text("settings"))
+        window.geometry("760x520")
+        window.minsize(700, 460)
         window.transient(self.root)
 
-        page_bg = "#202124" if self.dark_mode else "#f4f6f8"
-        panel_bg = "#30343a" if self.dark_mode else "#ffffff"
-        fg = "#ececec" if self.dark_mode else "#111111"
-        muted = "#b4b4b4" if self.dark_mode else "#676767"
-        border = "#41464d" if self.dark_mode else "#cfd7e2"
-        button_bg = "#202328" if self.dark_mode else "#eef2f6"
-        button_hover = "#343941" if self.dark_mode else "#dfe7f0"
-        accent_bg = "#ececec" if self.dark_mode else "#111111"
-        accent_hover = "#ffffff" if self.dark_mode else "#2d3748"
-        accent_fg = "#111111" if self.dark_mode else "#ffffff"
+        page_bg = "#171a1f" if self.dark_mode else "#f5f6f2"
+        sidebar_bg = "#111418" if self.dark_mode else "#e8ece5"
+        panel_bg = "#1f242b" if self.dark_mode else "#fbfcf8"
+        input_bg = "#222831" if self.dark_mode else "#ffffff"
+        fg = "#f2f3ef" if self.dark_mode else "#1c211f"
+        muted = "#a8b0b6" if self.dark_mode else "#65706b"
+        border = "#343c46" if self.dark_mode else "#cdd6ce"
+        button_bg = "#20262e" if self.dark_mode else "#f2f5ef"
+        button_hover = "#2b343f" if self.dark_mode else "#e0e8df"
+        selected_bg = "#29453f" if self.dark_mode else "#d6eee6"
+        accent_bg = "#3dd6b3" if self.dark_mode else "#0f8f75"
+        accent_hover = "#66e4c9" if self.dark_mode else "#0a755f"
+        accent_fg = "#071613" if self.dark_mode else "#ffffff"
 
         window.configure(bg=page_bg)
-        form = tk.Frame(window, bg=panel_bg, bd=0, highlightthickness=1, highlightbackground=border)
-        form.grid(row=0, column=0, sticky="nsew", padx=14, pady=14)
-        form.columnconfigure(1, weight=1)
+        window.columnconfigure(1, weight=1)
+        window.rowconfigure(0, weight=1)
 
-        title = tk.Label(
-            form,
-            text=self._text("api_settings"),
-            bg=panel_bg,
-            fg=fg,
-            anchor="w",
-            font=("Microsoft YaHei UI", 12, "bold"),
-        )
-        title.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(12, 10))
+        nav = tk.Frame(window, bg=sidebar_bg, bd=0, highlightthickness=0, width=172)
+        nav.grid(row=0, column=0, sticky="ns")
+        nav.grid_propagate(False)
+        nav.columnconfigure(0, weight=1)
 
-        key_label = tk.Label(form, text="API Key", bg=panel_bg, fg=muted, anchor="w")
-        key_label.grid(row=1, column=0, sticky="w", padx=(14, 10), pady=(0, 8))
-        api_key_var = tk.StringVar(value=str(self.app_config.get("DEEPSEEK_API_KEY") or ""))
-        api_key_entry = tk.Entry(
-            form,
-            textvariable=api_key_var,
-            width=42,
-            show="*",
+        content = tk.Frame(window, bg=page_bg, bd=0, highlightthickness=0)
+        content.grid(row=0, column=1, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(1, weight=1)
+
+        title_label = tk.Label(
+            content,
+            text="",
             bg=page_bg,
             fg=fg,
-            insertbackground=fg,
-            relief=tk.FLAT,
-            highlightthickness=1,
-            highlightbackground=border,
-            highlightcolor=border,
+            anchor="w",
+            font=("Microsoft YaHei UI", 16, "bold"),
         )
-        api_key_entry.grid(row=1, column=1, sticky="ew", padx=(0, 14), pady=(0, 8), ipady=5)
+        title_label.grid(row=0, column=0, sticky="ew", padx=22, pady=(20, 12))
 
-        base_label = tk.Label(form, text="Base URL", bg=panel_bg, fg=muted, anchor="w")
-        base_label.grid(row=2, column=0, sticky="w", padx=(14, 10), pady=(0, 8))
+        body = tk.Frame(content, bg=panel_bg, bd=0, highlightthickness=1, highlightbackground=border)
+        body.grid(row=1, column=0, sticky="nsew", padx=22, pady=(0, 12))
+        body.columnconfigure(0, minsize=260)
+        body.columnconfigure(1, minsize=320)
+        body.columnconfigure(2, weight=1)
+
+        actions = tk.Frame(content, bg=page_bg, bd=0, highlightthickness=0)
+        actions.grid(row=2, column=0, sticky="e", padx=22, pady=(0, 18))
+
+        nav_title = tk.Label(
+            nav,
+            text=self._text("settings"),
+            bg=sidebar_bg,
+            fg=fg,
+            anchor="w",
+            font=("Microsoft YaHei UI", 13, "bold"),
+        )
+        nav_title.grid(row=0, column=0, sticky="ew", padx=16, pady=(18, 14))
+
+        categories = [
+            ("api", self._text("settings_api")),
+            ("appearance", self._text("settings_appearance")),
+            ("model", self._text("settings_model")),
+            ("quick_bar", self._text("settings_quick_bar")),
+        ]
+        nav_buttons: Dict[str, tk.Button] = {}
+
+        api_key_var = tk.StringVar(value=str(self.app_config.get("DEEPSEEK_API_KEY") or ""))
         base_url_var = tk.StringVar(
             value=str(self.app_config.get("DEEPSEEK_BASE_URL") or DeepSeekClient.DEFAULT_BASE_URL)
         )
-        base_url_entry = tk.Entry(
-            form,
-            textvariable=base_url_var,
-            width=42,
-            bg=page_bg,
-            fg=fg,
-            insertbackground=fg,
-            relief=tk.FLAT,
-            highlightthickness=1,
-            highlightbackground=border,
-            highlightcolor=border,
-        )
-        base_url_entry.grid(row=2, column=1, sticky="ew", padx=(0, 14), pady=(0, 8), ipady=5)
-
         reveal_var = tk.BooleanVar(value=False)
+        theme_var = tk.StringVar(value="dark" if self.dark_mode else "light")
+        settings_language_var = tk.StringVar(value=self._language_display_name(self.language))
+        default_model_var = tk.StringVar(value=self.model_name)
+        pro_thinking_var = tk.StringVar(value=self.thinking_modes.get(DeepSeekClient.DEFAULT_MODEL, "disabled"))
+        flash_thinking_var = tk.StringVar(value=self.thinking_modes.get(DeepSeekClient.FLASH_MODEL, "disabled"))
+        quick_enabled_var = tk.BooleanVar(value=self.quick_bar_enabled)
+        quick_side_var = tk.StringVar(value=self._normalize_quick_bar_side(self.app_config.get("quick_bar_side")))
+        quick_y_value = self.app_config.get("quick_bar_y")
+        quick_y_var = tk.StringVar(value="" if quick_y_value is None else str(quick_y_value))
 
-        def toggle_reveal() -> None:
-            api_key_entry.configure(show="" if reveal_var.get() else "*")
+        def clear_body() -> None:
+            for child in body.winfo_children():
+                child.destroy()
 
-        reveal_check = tk.Checkbutton(
-            form,
-            text=self._text("show_api_key"),
-            variable=reveal_var,
-            command=toggle_reveal,
-            bg=panel_bg,
-            fg=muted,
-            activebackground=panel_bg,
-            activeforeground=fg,
-            selectcolor=panel_bg,
-        )
-        reveal_check.grid(row=3, column=1, sticky="w", padx=(0, 14), pady=(0, 12))
+        def section_header(row: int, text: str) -> int:
+            label = tk.Label(
+                body,
+                text=text,
+                bg=panel_bg,
+                fg=fg,
+                anchor="w",
+                font=("Microsoft YaHei UI", 12, "bold"),
+            )
+            label.grid(row=row, column=0, columnspan=2, sticky="w", padx=18, pady=(16, 10))
+            return row + 1
 
-        actions = tk.Frame(form, bg=panel_bg, bd=0, highlightthickness=0)
-        actions.grid(row=4, column=0, columnspan=2, sticky="e", padx=14, pady=(0, 14))
+        def setting_label(row: int, text: str, hint: str = "") -> None:
+            label = tk.Label(
+                body,
+                text=text,
+                bg=panel_bg,
+                fg=fg,
+                anchor="w",
+                font=("Microsoft YaHei UI", 10, "bold"),
+            )
+            label.grid(row=row, column=0, sticky="nw", padx=(18, 16), pady=(6, 2))
+            if hint:
+                hint_label = tk.Label(
+                    body,
+                    text=hint,
+                    bg=panel_bg,
+                    fg=muted,
+                    anchor="w",
+                    justify=tk.LEFT,
+                    wraplength=220,
+                    font=("Microsoft YaHei UI", 9),
+                )
+                hint_label.grid(row=row + 1, column=0, sticky="nw", padx=(18, 16), pady=(0, 10))
+
+        def styled_entry(row: int, variable: tk.StringVar, show: str = "") -> tk.Entry:
+            entry = tk.Entry(
+                body,
+                textvariable=variable,
+                show=show,
+                width=34,
+                bg=input_bg,
+                fg=fg,
+                insertbackground=fg,
+                relief=tk.FLAT,
+                highlightthickness=1,
+                highlightbackground=border,
+                highlightcolor=accent_bg,
+            )
+            entry.grid(row=row, column=1, sticky="w", padx=(0, 18), pady=(6, 10), ipady=6)
+            return entry
+
+        def styled_menu(row: int, variable: tk.StringVar, values: List[str]) -> tk.OptionMenu:
+            menu = tk.OptionMenu(body, variable, *values)
+            menu.configure(
+                width=30,
+                bg=input_bg,
+                fg=fg,
+                activebackground=button_hover,
+                activeforeground=fg,
+                relief=tk.FLAT,
+                bd=0,
+                highlightthickness=1,
+                highlightbackground=border,
+            )
+            menu["menu"].configure(bg=input_bg, fg=fg, activebackground=button_hover)
+            menu.grid(row=row, column=1, sticky="w", padx=(0, 18), pady=(6, 10))
+            return menu
+
+        def styled_check(row: int, variable: tk.BooleanVar, text: str) -> tk.Checkbutton:
+            check = tk.Checkbutton(
+                body,
+                text=text,
+                variable=variable,
+                bg=panel_bg,
+                fg=fg,
+                activebackground=panel_bg,
+                activeforeground=fg,
+                selectcolor=panel_bg,
+                anchor="w",
+            )
+            check.grid(row=row, column=1, sticky="w", padx=(0, 18), pady=(6, 10))
+            return check
+
+        def render_category(category: str) -> None:
+            clear_body()
+            for key, button in nav_buttons.items():
+                selected = key == category
+                self._configure_hover_button(button, selected_bg if selected else sidebar_bg, button_hover, fg)
+                button.configure(highlightbackground=sidebar_bg)
+
+            title_text = dict(categories).get(category, self._text("settings"))
+            title_label.configure(text=title_text)
+            row = 0
+
+            if category == "api":
+                row = section_header(row, self._text("api_settings"))
+                setting_label(row, "API Key", "Stored in local config.json.")
+                api_key_entry = styled_entry(row, api_key_var, show="" if reveal_var.get() else "*")
+                row += 2
+
+                def toggle_reveal() -> None:
+                    api_key_entry.configure(show="" if reveal_var.get() else "*")
+
+                reveal_check = styled_check(row, reveal_var, self._text("show_api_key"))
+                reveal_check.configure(command=toggle_reveal)
+                row += 1
+                setting_label(row, "Base URL", "OpenAI-compatible DeepSeek endpoint.")
+                styled_entry(row, base_url_var)
+                row += 2
+            elif category == "appearance":
+                row = section_header(row, self._text("settings_appearance"))
+                setting_label(row, self._text("theme_dark"), "Choose the application color theme.")
+                styled_menu(row, theme_var, ["light", "dark"])
+                row += 2
+                setting_label(row, self._text("language"), "Switch UI language at runtime.")
+                styled_menu(row, settings_language_var, ["English", "Chinese"])
+                row += 2
+            elif category == "model":
+                row = section_header(row, self._text("settings_model"))
+                setting_label(row, self._text("current_model"), "Default model for new requests.")
+                styled_menu(row, default_model_var, [DeepSeekClient.DEFAULT_MODEL, DeepSeekClient.FLASH_MODEL])
+                row += 2
+                setting_label(row, "V4 Pro Thinking", "Persisted thinking mode for V4 Pro.")
+                styled_menu(row, pro_thinking_var, ["disabled", "high", "max"])
+                row += 2
+                setting_label(row, "V4 Flash Thinking", "Persisted thinking mode for V4 Flash.")
+                styled_menu(row, flash_thinking_var, ["disabled", "high", "max"])
+                row += 2
+            else:
+                row = section_header(row, self._text("settings_quick_bar"))
+                setting_label(row, "Enable", "Show the always-on-top edge bar.")
+                styled_check(row, quick_enabled_var, self._text("settings_quick_bar"))
+                row += 1
+                setting_label(row, "Dock Side", "Side used when the bar snaps to the screen edge.")
+                styled_menu(row, quick_side_var, ["right", "left"])
+                row += 2
+                setting_label(row, "Y Position", "Leave empty to center the bar automatically.")
+                styled_entry(row, quick_y_var)
+                row += 2
+
+        for index, (key, label) in enumerate(categories, start=1):
+            button = tk.Button(
+                nav,
+                text=label,
+                relief=tk.FLAT,
+                bd=0,
+                anchor="w",
+                padx=14,
+                pady=9,
+                command=lambda category_key=key: render_category(category_key),
+            )
+            button.grid(row=index, column=0, sticky="ew", padx=10, pady=(0, 4))
+            nav_buttons[key] = button
 
         def close_window() -> None:
             self.api_settings_window = None
             window.destroy()
 
-        def save_api_settings() -> None:
+        def save_settings() -> None:
             api_key = api_key_var.get().strip()
             base_url = base_url_var.get().strip() or DeepSeekClient.DEFAULT_BASE_URL
-            if not api_key:
-                self.client = None
-                self.status_label.configure(text="API key required")
-                messagebox.showerror(
-                    self._text("api_key_missing_title"),
-                    self._text("api_required"),
-                    parent=window,
-                )
-                return
             self.app_config["DEEPSEEK_API_KEY"] = api_key
             self.app_config["DEEPSEEK_BASE_URL"] = base_url
+            self.dark_mode = theme_var.get() == "dark"
+            self.app_config["theme"] = theme_var.get()
+            self.language = "zh" if settings_language_var.get() == "Chinese" else "en"
+            self.app_config["language"] = self.language
+            self.model_name = default_model_var.get()
+            if self.model_name not in (DeepSeekClient.DEFAULT_MODEL, DeepSeekClient.FLASH_MODEL):
+                self.model_name = DeepSeekClient.DEFAULT_MODEL
+            self.app_config["default_model"] = self.model_name
+            self.thinking_modes = {
+                DeepSeekClient.DEFAULT_MODEL: self._normalize_thinking_mode(pro_thinking_var.get()),
+                DeepSeekClient.FLASH_MODEL: self._normalize_thinking_mode(flash_thinking_var.get()),
+            }
+            self.app_config["thinking_modes"] = dict(self.thinking_modes)
+            self.quick_bar_enabled = bool(quick_enabled_var.get())
+            self.quick_bar_side = self._normalize_quick_bar_side(quick_side_var.get())
+            self.app_config["quick_bar_enabled"] = self.quick_bar_enabled
+            self.app_config["quick_bar_side"] = self.quick_bar_side
+            y_text = quick_y_var.get().strip()
+            if y_text:
+                try:
+                    self.app_config["quick_bar_y"] = int(y_text)
+                except ValueError:
+                    self.app_config["quick_bar_y"] = None
+            else:
+                self.app_config["quick_bar_y"] = None
             save_config(self.app_config)
 
-            try:
-                self.client = DeepSeekClient(api_key=api_key or None, base_url=base_url)
-            except Exception as exc:
+            if api_key:
+                try:
+                    self.client = DeepSeekClient(api_key=api_key or None, base_url=base_url)
+                except Exception as exc:
+                    self.client = None
+                    self.status_label.configure(text="API settings saved, but DeepSeek is not ready")
+                    messagebox.showerror(
+                        self._text("api_saved_title"),
+                        f"{self._text('api_saved_error')}\n\n{exc}",
+                        parent=window,
+                    )
+                    return
+            else:
                 self.client = None
-                self.status_label.configure(text="API settings saved, but DeepSeek is not ready")
-                messagebox.showerror(
-                    self._text("api_saved_title"),
-                    f"{self._text('api_saved_error')}\n\n{exc}",
-                    parent=window,
-                )
-                return
+
+            if self.quick_bar_enabled and self.quick_bar is None:
+                self._build_quick_bar()
+            elif not self.quick_bar_enabled and self.quick_bar is not None and self.quick_bar.winfo_exists():
+                self.quick_bar.destroy()
+                self.quick_bar = None
+                self.quick_bar_frame = None
+                self.quick_bar_canvas = None
+                self.quick_bar_menu = None
+            elif self.quick_bar is not None and self.quick_bar.winfo_exists():
+                self._position_quick_bar()
 
             self.status_label.configure(text="API settings saved")
-            messagebox.showinfo(
-                self._text("api_settings"),
-                self._text("api_saved_ok"),
-                parent=window,
-            )
+            self._refresh_language_text()
+            self._refresh_model_display()
+            self.apply_theme()
+            messagebox.showinfo(self._text("settings"), self._text("api_saved_ok"), parent=window)
             close_window()
 
         cancel_button = tk.Button(
@@ -1955,17 +2563,18 @@ class DeepSeekChatApp:
             bd=0,
             padx=16,
             pady=6,
-            command=save_api_settings,
+            command=save_settings,
         )
         save_button.grid(row=0, column=1)
         self._configure_hover_button(save_button, accent_bg, accent_hover, accent_fg, accent_fg)
 
         window.protocol("WM_DELETE_WINDOW", close_window)
+        render_category("api")
         window.update_idletasks()
         x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - window.winfo_width()) // 2)
         y = self.root.winfo_rooty() + max(0, (self.root.winfo_height() - window.winfo_height()) // 3)
         window.geometry(f"+{x}+{y}")
-        api_key_entry.focus_set()
+        window.focus_set()
 
     def set_model(self, model_name: str) -> None:
         if self.is_waiting:
@@ -2031,6 +2640,8 @@ class DeepSeekChatApp:
         summarized_message_count: int,
     ) -> None:
         self.is_waiting = True
+        self.request_started_at = time.perf_counter()
+        self.quick_bar_last_timer_second = -1
         self.send_button.configure(state=tk.DISABLED)
         self._refresh_model_display()
         self.status_label.configure(
@@ -2344,12 +2955,20 @@ class DeepSeekChatApp:
                     )
 
                 self.is_waiting = False
+                self.request_started_at = None
+                self.quick_bar_last_timer_second = -1
                 self.send_button.configure(state=tk.NORMAL)
                 self._refresh_model_display()
                 self._save_current_session()
                 handled_final = True
         except queue.Empty:
             pass
+
+        if self.is_waiting:
+            elapsed_second = self._quick_bar_elapsed_seconds()
+            if elapsed_second != self.quick_bar_last_timer_second:
+                self.quick_bar_last_timer_second = elapsed_second
+                self.apply_theme()
 
         delay = 100 if handled_final else 50
         self.root.after(delay, self._poll_results)
@@ -2363,10 +2982,10 @@ def launch_gui() -> None:
     app = DeepSeekChatApp(root)
 
     def on_close() -> None:
-        app._save_current_session()
-        app.app_config["window_geometry"] = root.geometry()
-        save_config(app.app_config)
-        root.destroy()
+        if app.shutdown_requested or not app.quick_bar_enabled:
+            app.exit_app()
+        else:
+            app.hide_main_window()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     root.mainloop()

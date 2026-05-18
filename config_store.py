@@ -35,6 +35,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "language": "en",
     "window_geometry": "980x680",
     "sidebar_width": 218,
+    "quick_bar_enabled": True,
+    "quick_bar_side": "right",
+    "quick_bar_y": None,
 }
 
 
